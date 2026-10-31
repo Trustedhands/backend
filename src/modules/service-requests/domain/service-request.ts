@@ -376,6 +376,19 @@ export class ServiceRequest {
     this.record('COMPLETED', actorId, null, now);
   }
 
+  /** The release window passed without the client confirming: close it on their behalf. */
+  autoComplete(now = new Date()): void {
+    this.assertStatus(['ASSIGNED', 'IN_PROGRESS'], 'complete');
+    this.props.status = 'COMPLETED';
+    this.props.completedAt = now;
+    this.record(
+      'COMPLETED',
+      null,
+      'Completed automatically after the visit',
+      now,
+    );
+  }
+
   cancel(
     reason: string,
     actor: { id: string; isAdmin: boolean },

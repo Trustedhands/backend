@@ -218,4 +218,21 @@ describe('ServiceRequest', () => {
       ).toThrow(expect.objectContaining({ code: 'invalid_status_transition' }));
     });
   });
+
+  it('completes automatically, recorded as the system', () => {
+    const request = priced();
+    request.markPaid(21_000);
+    request.assignWorker(null, ADMIN);
+    request.pullChanges();
+    request.autoComplete(NOW);
+    expect(request.status).toBe('COMPLETED');
+    expect(request.pullChanges()).toEqual([
+      {
+        status: 'COMPLETED',
+        actorId: null,
+        note: 'Completed automatically after the visit',
+        at: NOW,
+      },
+    ]);
+  });
 });

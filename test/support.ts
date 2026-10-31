@@ -12,6 +12,8 @@ import {
   MobileMoneyGateway,
   type ProviderPaymentStatus,
 } from '../src/modules/payments/application/mobile-money.gateway.js';
+import { MoneyTransferGateway } from '../src/modules/payments/application/money-transfer.gateway.js';
+import { PaymentRejectedError } from '../src/modules/payments/application/mobile-money.gateway.js';
 import { PrismaService } from '../src/shared/database/prisma.service.js';
 import { setupApp } from '../src/setup-app.js';
 
@@ -56,12 +58,44 @@ export class FakeMomo extends MobileMoneyGateway {
   }
 }
 
+/** Stands in for MoMo Disbursement (refunds and payouts). */
+export class FakeTransfers extends MoneyTransferGateway {
+  readonly sent: Array<{
+    referenceId: string;
+    amount: number;
+    msisdn: string;
+    callbackPath: string;
+  }> = [];
+  readonly statuses = new Map<string, ProviderPaymentStatus>();
+  /** Next transfer is refused outright (e.g. unregistered number) */
+  rejectNext = false;
+
+  async transfer(input: {
+    referenceId: string;
+    amount: number;
+    msisdn: string;
+    callbackPath: string;
+  }): Promise<void> {
+    if (this.rejectNext) {
+      this.rejectNext = false;
+      throw new PaymentRejectedError('MoMo rejected the request (400)');
+    }
+    this.sent.push(input);
+    this.statuses.set(input.referenceId, { status: 'PENDING' });
+  }
+
+  async getTransferStatus(referenceId: string): Promise<ProviderPaymentStatus> {
+    return this.statuses.get(referenceId) ?? { status: 'NOT_FOUND' };
+  }
+}
+
 export interface TestApp {
   app: INestApplication;
   prisma: PrismaService;
   mailer: FakeMailer;
   sms: FakeSms;
   momo: FakeMomo;
+  transfers: FakeTransfers;
   http: () => ReturnType<typeof request>;
 }
 
@@ -70,6 +104,7 @@ export async function createTestApp(): Promise<TestApp> {
   const mailer = new FakeMailer();
   const sms = new FakeSms();
   const momo = new FakeMomo();
+  const transfers = new FakeTransfers();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(Mailer)
     .useValue(mailer)
@@ -77,6 +112,8 @@ export async function createTestApp(): Promise<TestApp> {
     .useValue(sms)
     .overrideProvider(MobileMoneyGateway)
     .useValue(momo)
+    .overrideProvider(MoneyTransferGateway)
+    .useValue(transfers)
     .compile();
   const app = moduleRef.createNestApplication();
   setupApp(app);
@@ -87,6 +124,7 @@ export async function createTestApp(): Promise<TestApp> {
     mailer,
     sms,
     momo,
+    transfers,
     http: () => request(app.getHttpServer()),
   };
 }
@@ -212,6 +250,24 @@ export async function deleteUsers(
       OR: [{ clientId: { in: userIds } }, { workerId: { in: workerIds } }],
     },
   });
+  const requestIds = (
+    await prisma.serviceRequest.findMany({
+      where: requests,
+      select: { id: true },
+    })
+  ).map((r) => r.id);
+  await prisma.ledgerEntry.deleteMany({
+    where: {
+      OR: [
+        { serviceRequestId: { in: requestIds } },
+        { workerId: { in: workerIds } },
+      ],
+    },
+  });
+  await prisma.refund.deleteMany({
+    where: { payment: { clientId: { in: userIds } } },
+  });
+  await prisma.payout.deleteMany({ where: { workerId: { in: workerIds } } });
   await prisma.serviceRequestEvent.deleteMany({
     where: { serviceRequest: requests },
   });

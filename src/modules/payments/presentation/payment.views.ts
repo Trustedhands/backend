@@ -35,8 +35,9 @@ export class TransactionView {
   receiptReference: string | null;
   /** Always positive; `kind` gives the direction */
   amountRwf: number;
-  @ApiProperty({ enum: ['PENDING', 'SUCCESSFUL', 'FAILED', 'CREDITED'] })
-  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'CREDITED';
+  /** Refunds go back to the payer's MoMo number: PENDING, then REFUNDED */
+  @ApiProperty({ enum: ['PENDING', 'SUCCESSFUL', 'FAILED', 'REFUNDED'] })
+  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'REFUNDED';
   at: Date;
 }
 

@@ -1,6 +1,12 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequirePermission } from '../../../shared/auth/decorators.js';
+import type { AuthUser } from '../../../shared/auth/auth-user.js';
+import {
+  CurrentUser,
+  RequirePermission,
+} from '../../../shared/auth/decorators.js';
+import { can } from '../../../shared/auth/permissions.js';
+import { PrismaService } from '../../../shared/database/prisma.service.js';
 import { OperationsService } from '../application/operations.service.js';
 import {
   ClientDetailView,
@@ -15,12 +21,21 @@ import {
 @ApiBearerAuth()
 @Controller('admin')
 export class OperationsController {
-  constructor(private readonly ops: OperationsService) {}
+  constructor(
+    private readonly ops: OperationsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @RequirePermission('dashboard.view')
   @Get('dashboard')
-  dashboard(): Promise<DashboardView> {
-    return this.ops.dashboard();
+  async dashboard(@CurrentUser() user: AuthUser): Promise<DashboardView> {
+    const profile = await this.prisma.profile.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { staffRole: true },
+    });
+    return this.ops.dashboard(
+      profile.staffRole !== null && can(profile.staffRole, 'payments.view'),
+    );
   }
 
   @RequirePermission('dashboard.view')

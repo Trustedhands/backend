@@ -109,7 +109,8 @@ Bounded contexts:
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
 - **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
 - **team**: staff roles, invitations, and removing access.
-- **operations**: dashboard figures, global search and the clients list.
+- **operations**: dashboard figures (finance figures only for payment roles), global search and the clients list.
+- **finance**: escrow, release, refunds, payouts, the worker wallets, CSV export, and the settlement job.
 - **reviews**: clients rate the worker on a completed job, once per job. Ratings of 2 or below are emailed to `SUPPORT_INBOX`.
 - **support**: "Report an issue" tickets (`OPEN → ACTIVE → CLOSED`, reopenable), each optionally linked to a booking. New tickets are emailed to `SUPPORT_INBOX`.
 
@@ -147,6 +148,37 @@ The design rules behind this flow:
 The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL` and `MOMO_COLLECTION_CURRENCY=RWF`. That also limits payers to MTN Rwanda numbers (078/079).
 
 MTN's failure codes (e.g. `NOT_ENOUGH_FUNDS`) are logged as-is and shown to the payer as plain-language messages.
+
+### Escrow, release, refunds and payouts
+
+Money is tracked in an append-only ledger (`ledger_entries`). Each account's balance is the sum of its entries, and every entry is written in the same transaction as the state change behind it.
+
+| When | Ledger |
+| --- | --- |
+| A client's MoMo payment succeeds | **Escrow** +paid |
+| The job is released | Escrow −paid; **worker wallet** +worker fee; **platform** +fee (placements: all to the platform) |
+| A refund is issued before release | Escrow −refund. The worker's share is reduced first, then the fee |
+| A refund is issued after release | Platform −refund. Worker wallets are never clawed back |
+| A payout is started | Worker wallet −amount (held, so it can't be paid twice) |
+| A refund or payout fails | The held amount is reversed |
+
+- **Release** happens when the client marks the job done. If they don't, the job auto-completes once the visit has been over for **release window** hours (Settings, default 24).
+- **Refunds** go back to the payer's MoMo number through **MoMo Disbursement** (`POST /v1/admin/finance/refunds`).
+- **Payouts** are started by finance staff. MoMo payouts go out immediately through Disbursement. Bank payouts are confirmed by hand with `mark-paid` or `mark-failed`.
+
+The **settlement job** runs every minute in each API instance (`src/modules/finance/application/settlement.job.ts`). It:
+
+- auto-completes and releases jobs that are due
+- settles MoMo payments, refunds and payouts still pending
+
+Every step is idempotent: rows are locked, and status updates are conditional on the current state, so overlapping runs and several instances are safe.
+
+MoMo callbacks to register on the API user:
+
+- Collections: `MOMO_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/<paymentId>`)
+- Disbursement: `MOMO_DSB_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/refunds/<id>` and `/payouts/<id>`)
+
+Callback bodies are never trusted; they only trigger a status check against MoMo. Without callbacks (e.g. locally), the settlement job settles everything within a minute or two.
 
 ## Testing
 

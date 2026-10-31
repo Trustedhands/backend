@@ -318,9 +318,11 @@ model Worker {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  assignments ServiceRequest[]
-  reviews     Review[]
-  documents   WorkerDocument[]
+  assignments   ServiceRequest[]
+  reviews       Review[]
+  documents     WorkerDocument[]
+  payouts       Payout[]
+  ledgerEntries LedgerEntry[]
 
   @@index([status])
   @@map("workers")
@@ -503,6 +505,8 @@ model ServiceRequest {
   remindedAt         DateTime?
   cancellationReason String?
   completedAt        DateTime?
+  /// When escrow was split to the worker and platform
+  releasedAt         DateTime?
   /// Optimistic concurrency token, bumped on every update
   version            Int                  @default(0)
   createdAt          DateTime             @default(now())
@@ -577,6 +581,7 @@ model Payment {
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id])
   client         Profile        @relation(fields: [clientId], references: [id])
   refunds        Refund[]
+  ledgerEntries  LedgerEntry[]
 
   @@index([clientId, createdAt])
   @@index([serviceRequestId])
@@ -585,18 +590,34 @@ model Payment {
 }
 
 /// Refunds are credited to the client's wallet.
+/// Money sent back to the payer's MoMo number (Disbursement transfer).
 model Refund {
-  id         String   @id @default(uuid()) @db.Uuid
-  paymentId  String   @db.Uuid
-  amountRwf  Int
-  reason     String
-  issuedById String   @db.Uuid
-  createdAt  DateTime @default(now())
+  id                    String        @id @default(uuid()) @db.Uuid
+  paymentId             String        @db.Uuid
+  amountRwf             Int
+  reason                String
+  issuedById            String        @db.Uuid
+  /// The ticket it resolves, if any
+  ticketId              String?       @db.Uuid
+  status                PaymentStatus @default(PENDING)
+  /// E.164-less MSISDN the money is sent to (the payer's number)
+  msisdn                String
+  /// ESCROW before the worker share is released; PLATFORM after
+  chargedTo             LedgerAccount
+  /// X-Reference-Id sent to MoMo Disbursement
+  providerReference     String        @unique @db.Uuid
+  providerTransactionId String?
+  failureReason         String?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  payment     Payment      @relation(fields: [paymentId], references: [id])
-  walletEntry WalletEntry?
+  payment       Payment       @relation(fields: [paymentId], references: [id])
+  walletEntry   WalletEntry?
+  ledgerEntries LedgerEntry[]
 
   @@index([paymentId])
+  @@index([status])
   @@map("refunds")
   @@schema("app")
 }
@@ -763,5 +784,95 @@ model TicketMessage {
 
   @@index([ticketId, createdAt])
   @@map("ticket_messages")
+  @@schema("app")
+}
+
+// ─── Ledger & payouts ───────────────────────────────────────────────────────
+
+enum LedgerAccount {
+  /// Paid by clients, service not yet complete
+  ESCROW
+  /// Platform fees (and match fees)
+  PLATFORM
+  /// Owed to a worker (workerId set)
+  WORKER
+
+  @@schema("app")
+}
+
+enum LedgerEntryKind {
+  PAYMENT_RECEIVED
+  RELEASED_TO_WORKER
+  RELEASED_TO_PLATFORM
+  REFUND
+  /// A refund transfer failed; the reserved amount goes back
+  REFUND_REVERSED
+  PAYOUT
+  /// A payout failed; the amount goes back to the worker's wallet
+  PAYOUT_REVERSED
+
+  @@schema("app")
+}
+
+/// Append-only. An account's balance is the sum of its entries.
+model LedgerEntry {
+  id               String          @id @default(uuid()) @db.Uuid
+  account          LedgerAccount
+  /// Set for WORKER entries
+  workerId         String?         @db.Uuid
+  kind             LedgerEntryKind
+  /// Positive credits, negative debits
+  amountRwf        Int
+  serviceRequestId String?         @db.Uuid
+  paymentId        String?         @db.Uuid
+  refundId         String?         @db.Uuid
+  payoutId         String?         @db.Uuid
+  createdAt        DateTime        @default(now())
+
+  worker  Worker?  @relation(fields: [workerId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+  refund  Refund?  @relation(fields: [refundId], references: [id])
+  payout  Payout?  @relation(fields: [payoutId], references: [id])
+
+  @@index([account, createdAt])
+  @@index([workerId])
+  @@index([serviceRequestId])
+  @@map("ledger_entries")
+  @@schema("app")
+}
+
+enum PayoutMethod {
+  MOMO
+  BANK
+
+  @@schema("app")
+}
+
+/// Money paid out of a worker's wallet, started by finance staff.
+model Payout {
+  id                    String        @id @default(uuid()) @db.Uuid
+  workerId              String        @db.Uuid
+  amountRwf             Int
+  method                PayoutMethod
+  status                PaymentStatus @default(PENDING)
+  /// Snapshot of where it was sent: MSISDN, or "Bank · account"
+  destination           String
+  initiatedById         String        @db.Uuid
+  /// MoMo X-Reference-Id; null for bank payouts
+  providerReference     String?       @unique @db.Uuid
+  providerTransactionId String?
+  /// Bank transfer reference entered by finance
+  manualReference       String?
+  failureReason         String?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  worker        Worker        @relation(fields: [workerId], references: [id])
+  ledgerEntries LedgerEntry[]
+
+  @@index([workerId, createdAt])
+  @@index([status])
+  @@map("payouts")
   @@schema("app")
 }

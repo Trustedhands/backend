@@ -107,6 +107,19 @@ export class Env {
   @IsOptional()
   @IsString()
   MOMO_CALLBACK_URL?: string;
+
+  /** Disbursement (refunds, payouts) subscription key */
+  @IsOptional()
+  @IsString()
+  MOMO_DSB_PRY_KEY?: string;
+
+  @IsIn(['EUR', 'RWF'])
+  MOMO_DISBURSEMENT_CURRENCY: string = 'EUR';
+
+  /** Base for disbursement callbacks, e.g. https://api.example.rw/v1/webhooks/momo */
+  @IsOptional()
+  @IsString()
+  MOMO_DSB_CALLBACK_URL?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Env {

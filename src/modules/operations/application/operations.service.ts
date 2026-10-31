@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import { NotFoundError } from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
+import { FinanceService } from '../../finance/application/finance.service.js';
 import { ServiceRequestQueries } from '../../service-requests/infrastructure/service-request.queries.js';
 import type {
   ClientDetailView,
@@ -33,9 +34,13 @@ export class OperationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requests: ServiceRequestQueries,
+    private readonly finance: FinanceService,
   ) {}
 
-  async dashboard(now = new Date()): Promise<DashboardView> {
+  async dashboard(
+    includeFinance: boolean,
+    now = new Date(),
+  ): Promise<DashboardView> {
     const kigali = new Date(now.getTime() + KIGALI_OFFSET_MS);
     const dayStart = new Date(
       Date.UTC(
@@ -92,8 +97,12 @@ export class OperationsService {
       }),
     ]);
 
-    const creators = await this.names(pending.map((w) => w.createdById));
+    const [creators, finance] = await Promise.all([
+      this.names(pending.map((w) => w.createdById)),
+      includeFinance ? this.finance.overview(now) : Promise.resolve(null),
+    ]);
     return {
+      finance,
       counts: {
         newCount,
         oldestNewWaitingMinutes: oldestNew

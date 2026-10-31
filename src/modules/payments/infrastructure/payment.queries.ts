@@ -67,7 +67,11 @@ export class PaymentQueries {
         include: { serviceRequest: request },
       }),
       this.prisma.refund.findMany({
-        where: { payment: { clientId } },
+        // Failed refunds are retried by ops; the client hasn't lost anything
+        where: {
+          payment: { clientId },
+          status: { in: ['PENDING', 'SUCCESSFUL'] },
+        },
         orderBy: { createdAt: 'desc' },
         take: 100,
         include: { payment: { include: { serviceRequest: request } } },
@@ -110,8 +114,11 @@ export class PaymentQueries {
         ),
         receiptReference: formatReceiptRef(r.payment.receiptNumber),
         amountRwf: r.amountRwf,
-        status: 'CREDITED' as const,
-        at: r.createdAt,
+        status:
+          r.status === 'SUCCESSFUL'
+            ? ('REFUNDED' as const)
+            : ('PENDING' as const),
+        at: r.completedAt ?? r.createdAt,
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 

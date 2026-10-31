@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { WorkerStatus } from '../../../generated/prisma/enums.js';
+import { FinanceOverviewView } from '../../finance/presentation/finance.dto.js';
 import { AdminServiceRequestSummaryView } from '../../service-requests/presentation/service-request.views.js';
 
 export class DashboardCountsView {
@@ -35,6 +36,8 @@ export class WorkerToVerifyView {
 
 export class DashboardView {
   counts: DashboardCountsView;
+  /** "Wallets" card; null for staff without payments access */
+  finance: FinanceOverviewView | null;
   needsAction: AdminServiceRequestSummaryView[];
   workersToVerify: WorkerToVerifyView[];
 }

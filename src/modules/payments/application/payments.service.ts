@@ -7,6 +7,7 @@ import {
   UnavailableError,
 } from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
+import { postLedger } from '../../../shared/ledger/ledger.js';
 import { formatRequestRef } from '../../../shared/http/references.js';
 import { ConfigurationService } from '../../configuration/application/configuration.service.js';
 import { ServiceRequestRepository } from '../../service-requests/domain/service-request.repository.js';
@@ -143,6 +144,12 @@ export class PaymentsService {
     if (payment) await this.sync(payment);
   }
 
+  /** Used by the settlement job for payments nobody is polling. */
+  async syncById(paymentId: string): Promise<void> {
+    const payment = await this.payments.findById(paymentId);
+    if (payment) await this.sync(payment);
+  }
+
   /** Brings a PENDING payment up to date with MoMo. */
   async sync(payment: Payment): Promise<Payment> {
     if (payment.status !== 'PENDING') return payment;
@@ -185,6 +192,16 @@ export class PaymentsService {
       payment.succeed(transactionId);
       // Someone else (callback vs. poll) already settled it
       if (!(await this.payments.settle(payment, tx))) return;
+      // The money now sits in escrow until the job is released
+      await postLedger(tx, [
+        {
+          account: 'ESCROW',
+          kind: 'PAYMENT_RECEIVED',
+          amountRwf: payment.amountRwf,
+          paymentId: payment.id,
+          serviceRequestId: payment.serviceRequestId,
+        },
+      ]);
 
       const request = await this.requests.findById(
         payment.serviceRequestId,

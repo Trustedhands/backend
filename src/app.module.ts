@@ -5,6 +5,7 @@ import { HealthController } from './health/health.controller.js';
 import { AuthAccountsModule } from './modules/auth/auth.module.js';
 import { ConfigurationModule } from './modules/configuration/configuration.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
+import { FinanceModule } from './modules/finance/finance.module.js';
 import { OperationsModule } from './modules/operations/operations.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ReviewsModule } from './modules/reviews/reviews.module.js';
@@ -35,6 +36,7 @@ import { DatabaseModule } from './shared/database/database.module.js';
     PaymentsModule,
     ReviewsModule,
     OperationsModule,
+    FinanceModule,
     SupportModule,
   ],
   controllers: [HealthController],

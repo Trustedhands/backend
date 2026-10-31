@@ -9,7 +9,7 @@ TrustedHands is **ops-mediated**. Clients describe a job, the TrustedHands team 
 - **NestJS 12** (ESM), domain-driven layout
 - **Prisma 7** with the `pg` driver adapter, on **Supabase Postgres**
 - **Own JWT auth**: email + password, short-lived access tokens, rotating refresh tokens in an httpOnly cookie (see [Authentication](#authentication))
-- **Resend** for email (verification and password-reset codes)
+- **Resend** for email and **Africa's Talking** for SMS (verification and password-reset codes)
 - **MTN MoMo Collections API** for payments
 - Vitest (unit + e2e), oxlint, Prettier
 
@@ -67,7 +67,8 @@ How it works:
 - **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
 - **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, configure Express `trust proxy` so the limits apply to client IPs.
 - **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
-- **SMS** only logs codes for now (`SMS_PROVIDER=log`). The server refuses to start in production until a real provider is added.
+- **SMS** goes through Africa's Talking (`SMS_PROVIDER=africastalking`), using the sandbox when `AFRICAS_TALKING_USERNAME=sandbox`.
+- **`log` providers** print messages to the server log instead of sending them. They're handy locally, and the server refuses to start in production with either set to `log`.
 
 ## Architecture
 
@@ -121,7 +122,9 @@ The design rules behind this flow:
 - The price can't change while a charge is pending.
 - A network error on `requesttopay` leaves the payment `PENDING`, since MoMo may have accepted it. Only a definite 4xx rejection marks it `FAILED`.
 
-The MoMo sandbox only accepts `EUR` and its own test numbers. Set `MOMO_TARGET_ENVIRONMENT` and `MOMO_CURRENCY=RWF` for production, which also enforces MTN Rwanda numbers (078/079).
+The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL` and `MOMO_COLLECTION_CURRENCY=RWF`. That also limits payers to MTN Rwanda numbers (078/079).
+
+MTN's failure codes (e.g. `NOT_ENOUGH_FUNDS`) are logged as-is and shown to the payer as plain-language messages.
 
 ## Testing
 

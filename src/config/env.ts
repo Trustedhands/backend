@@ -45,8 +45,24 @@ export class Env {
   EMAIL_FROM?: string;
 
   /** How phone codes are delivered; "log" is for development only */
-  @IsIn(['log'])
-  SMS_PROVIDER = 'log' as const;
+  @IsIn(['log', 'africastalking'])
+  SMS_PROVIDER: 'log' | 'africastalking' = 'log';
+
+  @ValidateIf((env: Env) => env.SMS_PROVIDER === 'africastalking')
+  @IsString()
+  @IsNotEmpty()
+  AFRICAS_TALKING_API_KEY?: string;
+
+  /** "sandbox" selects Africa's Talking's sandbox */
+  @ValidateIf((env: Env) => env.SMS_PROVIDER === 'africastalking')
+  @IsString()
+  @IsNotEmpty()
+  AFRICAS_TALKING_USERNAME?: string;
+
+  /** Registered alphanumeric sender ID; omit to use Africa's Talking's shared one */
+  @IsOptional()
+  @IsString()
+  AFRICAS_TALKING_SENDER_ID?: string;
 
   @IsInt()
   PORT: number = 3000;
@@ -61,16 +77,18 @@ export class Env {
   @IsString()
   MOMO_TARGET_ENVIRONMENT: string = 'sandbox';
 
+  /** The sandbox only accepts EUR; production in Rwanda uses RWF */
   @IsIn(['EUR', 'RWF'])
-  MOMO_CURRENCY: string = 'EUR';
+  MOMO_COLLECTION_CURRENCY: string = 'EUR';
+
+  /** Collections product subscription key (primary) */
+  @IsOptional()
+  @IsString()
+  MOMO_PRY_KEY?: string;
 
   @IsOptional()
   @IsString()
-  MOMO_SUBSCRIPTION_KEY?: string;
-
-  @IsOptional()
-  @IsString()
-  MOMO_API_USER?: string;
+  MOMO_API_USER_ID?: string;
 
   @IsOptional()
   @IsString()

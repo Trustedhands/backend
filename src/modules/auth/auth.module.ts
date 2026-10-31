@@ -6,6 +6,7 @@ import { AuthService } from './application/auth.service.js';
 import { Mailer, SmsSender } from './application/ports.js';
 import { Sessions } from './application/sessions.service.js';
 import { VerificationCodes } from './application/verification-codes.service.js';
+import { AfricasTalkingSmsSender } from './infrastructure/africas-talking.sms.js';
 import { LogMailer, LogSmsSender } from './infrastructure/log-senders.js';
 import { PasswordHasher } from './infrastructure/password-hasher.js';
 import { ResendMailer } from './infrastructure/resend.mailer.js';
@@ -36,7 +37,14 @@ import { AuthController } from './presentation/auth.controller.js';
           ? new ResendMailer(config)
           : new LogMailer(),
     },
-    { provide: SmsSender, useClass: LogSmsSender },
+    {
+      provide: SmsSender,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) =>
+        config.get('SMS_PROVIDER', { infer: true }) === 'africastalking'
+          ? new AfricasTalkingSmsSender(config)
+          : new LogSmsSender(),
+    },
   ],
   exports: [Mailer],
 })

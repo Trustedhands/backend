@@ -46,7 +46,7 @@ export class MtnMomoGateway extends MobileMoneyGateway {
       },
       body: JSON.stringify({
         amount: String(input.amount),
-        currency: this.config.get('MOMO_CURRENCY', { infer: true }),
+        currency: this.config.get('MOMO_COLLECTION_CURRENCY', { infer: true }),
         externalId: input.externalId,
         payer: { partyIdType: 'MSISDN', partyId: input.msisdn },
         payerMessage: input.message,
@@ -94,11 +94,12 @@ export class MtnMomoGateway extends MobileMoneyGateway {
       case 'FAILED':
       case 'REJECTED':
       case 'TIMEOUT': {
-        const reason =
+        const code =
           typeof body.reason === 'string'
             ? body.reason
-            : (body.reason?.message ?? body.reason?.code ?? body.status);
-        return { status: 'FAILED', reason };
+            : (body.reason?.code ?? body.reason?.message ?? body.status);
+        this.logger.warn(`requesttopay ${referenceId} ${body.status}: ${code}`);
+        return { status: 'FAILED', reason: describeFailure(code) };
       }
       default:
         return { status: 'PENDING' };
@@ -159,10 +160,10 @@ export class MtnMomoGateway extends MobileMoneyGateway {
   }
 
   private credentials() {
-    const subscriptionKey = this.config.get('MOMO_SUBSCRIPTION_KEY', {
+    const subscriptionKey = this.config.get('MOMO_PRY_KEY', {
       infer: true,
     });
-    const apiUser = this.config.get('MOMO_API_USER', { infer: true });
+    const apiUser = this.config.get('MOMO_API_USER_ID', { infer: true });
     const apiKey = this.config.get('MOMO_API_KEY', { infer: true });
     if (!subscriptionKey || !apiUser || !apiKey) {
       throw new UnavailableError(
@@ -172,4 +173,21 @@ export class MtnMomoGateway extends MobileMoneyGateway {
     }
     return { subscriptionKey, apiUser, apiKey };
   }
+}
+
+/** MTN's failure codes, in words a payer can act on. Unknown codes get a generic message. */
+const FAILURE_MESSAGES: Record<string, string> = {
+  NOT_ENOUGH_FUNDS: 'Your MoMo balance is too low for this payment.',
+  PAYER_LIMIT_REACHED: 'This payment is over your MoMo transaction limit.',
+  PAYER_NOT_FOUND: "This number isn't registered for MTN Mobile Money.",
+  NOT_ALLOWED: "This number can't make MoMo payments right now.",
+  APPROVAL_REJECTED: 'The payment was declined on your phone.',
+  TRANSACTION_CANCELED: 'The payment was cancelled on your phone.',
+  EXPIRED: 'The payment request expired before it was approved.',
+  TIMEOUT: 'The payment request expired before it was approved.',
+  REJECTED: 'The payment was declined on your phone.',
+};
+
+export function describeFailure(code: string): string {
+  return FAILURE_MESSAGES[code] ?? 'MoMo could not complete the payment.';
 }

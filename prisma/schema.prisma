@@ -462,6 +462,13 @@ enum RequestKind {
   @@schema("app")
 }
 
+enum PlacementArrangement {
+  LIVE_IN
+  LIVE_OUT
+
+  @@schema("app")
+}
+
 enum GenderPreference {
   ANY
   FEMALE
@@ -471,18 +478,25 @@ enum GenderPreference {
 }
 
 model ServiceRequest {
-  id                 String           @id @default(uuid()) @db.Uuid
+  id                   String                @id @default(uuid()) @db.Uuid
   /// Human-readable sequence, shown as SR-<number>
-  number             Int              @unique @default(autoincrement())
-  clientId           String           @db.Uuid
+  number               Int                   @unique @default(autoincrement())
+  clientId             String                @db.Uuid
   /// ServiceType key
-  category           String
-  kind               RequestKind      @default(VISIT)
-  description        String
-  scheduledAt        DateTime
-  durationHours      Decimal          @db.Decimal(4, 1)
-  preferredGender    GenderPreference @default(ANY)
-  preferredLanguages Language[]
+  category             String
+  kind                 RequestKind           @default(VISIT)
+  description          String
+  scheduledAt          DateTime
+  /// Visits only; null for placements
+  durationHours        Decimal?              @db.Decimal(4, 1)
+  /// Placements only: live-in or live-out
+  placementArrangement PlacementArrangement?
+  /// Placements only: working days per week
+  placementDaysPerWeek Int?                  @db.SmallInt
+  /// Placements only: monthly salary the client has in mind (paid by them, not through us)
+  placementSalaryRwf   Int?
+  preferredGender      GenderPreference      @default(ANY)
+  preferredLanguages   Language[]
 
   // Address snapshot, so later edits to the client's address don't rewrite history
   addressDistrict  String

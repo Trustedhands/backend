@@ -37,6 +37,9 @@ export class PrismaServiceRequestRepository extends ServiceRequestRepository {
         description: s.description,
         scheduledAt: s.scheduledAt,
         durationHours: s.durationHours,
+        placementArrangement: s.placement?.arrangement ?? null,
+        placementDaysPerWeek: s.placement?.daysPerWeek ?? null,
+        placementSalaryRwf: s.placement?.salaryRwf ?? null,
         preferredGender: s.preferredGender,
         preferredLanguages: s.preferredLanguages,
         addressDistrict: s.address.district,
@@ -125,7 +128,17 @@ function toDomain(row: ServiceRequestRow): ServiceRequest {
     kind: row.kind,
     description: row.description,
     scheduledAt: row.scheduledAt,
-    durationHours: row.durationHours.toNumber(),
+    durationHours: row.durationHours?.toNumber() ?? null,
+    placement:
+      row.kind === 'PLACEMENT' &&
+      row.placementArrangement &&
+      row.placementDaysPerWeek
+        ? {
+            arrangement: row.placementArrangement,
+            daysPerWeek: row.placementDaysPerWeek,
+            salaryRwf: row.placementSalaryRwf,
+          }
+        : null,
     preferredGender: row.preferredGender,
     preferredLanguages: row.preferredLanguages,
     address: {

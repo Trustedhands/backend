@@ -98,7 +98,7 @@ export class SettlementJob
       if (
         releaseDueAt(
           c.scheduledAt,
-          c.durationHours.toNumber(),
+          c.durationHours?.toNumber() ?? 0,
           releaseAfterHours,
         ) > now
       )

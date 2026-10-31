@@ -62,6 +62,18 @@ const ADMIN_CANCELLABLE: readonly ServiceRequestStatus[] = [
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MIN_DURATION_HOURS = 0.5;
 const MAX_DURATION_HOURS = 12;
+const MAX_SALARY_RWF = 10_000_000;
+
+export type PlacementArrangement = 'LIVE_IN' | 'LIVE_OUT';
+
+/** What a long-term placement needs instead of a duration. */
+export interface PlacementTerms {
+  arrangement: PlacementArrangement;
+  /** 1–7 */
+  daysPerWeek: number;
+  /** Monthly salary the client has in mind; agreed between them and the worker */
+  salaryRwf: number | null;
+}
 
 export interface ServiceAddress {
   district: string;
@@ -86,8 +98,12 @@ export interface ServiceRequestProps {
   category: ServiceCategory;
   kind: RequestKind;
   description: string;
+  /** Visit start, or placement start date */
   scheduledAt: Date;
-  durationHours: number;
+  /** Visits only */
+  durationHours: number | null;
+  /** Placements only */
+  placement: PlacementTerms | null;
   preferredGender: GenderPreference;
   preferredLanguages: Language[];
   address: ServiceAddress;
@@ -110,7 +126,10 @@ export interface SubmitServiceRequest {
   kind: RequestKind;
   description: string;
   scheduledAt: Date;
-  durationHours: number;
+  /** Required for visits */
+  durationHours?: number | null;
+  /** Required for placements */
+  placement?: PlacementTerms | null;
   preferredGender: GenderPreference;
   preferredLanguages: Language[];
   address: ServiceAddress;
@@ -148,20 +167,31 @@ export class ServiceRequest {
         `Description must be at most ${MAX_DESCRIPTION_LENGTH} characters`,
       );
     }
-    if (
-      input.durationHours < MIN_DURATION_HOURS ||
-      input.durationHours > MAX_DURATION_HOURS ||
-      !Number.isInteger(input.durationHours * 2)
-    ) {
-      throw new InvalidInputError(
-        'invalid_duration',
-        `Duration must be between ${MIN_DURATION_HOURS} and ${MAX_DURATION_HOURS} hours, in half-hour steps`,
-      );
+    let durationHours: number | null = null;
+    let placement: PlacementTerms | null = null;
+    if (input.kind === 'VISIT') {
+      const d = input.durationHours;
+      if (
+        d == null ||
+        d < MIN_DURATION_HOURS ||
+        d > MAX_DURATION_HOURS ||
+        !Number.isInteger(d * 2)
+      ) {
+        throw new InvalidInputError(
+          'invalid_duration',
+          `Duration must be between ${MIN_DURATION_HOURS} and ${MAX_DURATION_HOURS} hours, in half-hour steps`,
+        );
+      }
+      durationHours = d;
+    } else {
+      placement = validatePlacement(input.placement);
     }
     if (input.scheduledAt.getTime() <= now.getTime()) {
       throw new InvalidInputError(
         'schedule_in_past',
-        'Choose a date and time in the future',
+        input.kind === 'PLACEMENT'
+          ? 'Choose a start date in the future'
+          : 'Choose a date and time in the future',
       );
     }
 
@@ -173,7 +203,8 @@ export class ServiceRequest {
       kind: input.kind,
       description,
       scheduledAt: input.scheduledAt,
-      durationHours: input.durationHours,
+      durationHours,
+      placement,
       preferredGender: input.preferredGender,
       preferredLanguages: [...new Set(input.preferredLanguages)],
       address: input.address,
@@ -441,4 +472,41 @@ export class ServiceRequest {
   ) {
     this.changes.push({ status, actorId, note, at });
   }
+}
+
+function validatePlacement(
+  p: PlacementTerms | null | undefined,
+): PlacementTerms {
+  if (!p || (p.arrangement !== 'LIVE_IN' && p.arrangement !== 'LIVE_OUT')) {
+    throw new InvalidInputError(
+      'placement_required',
+      'Choose live-in or live-out',
+    );
+  }
+  if (
+    !Number.isInteger(p.daysPerWeek) ||
+    p.daysPerWeek < 1 ||
+    p.daysPerWeek > 7
+  ) {
+    throw new InvalidInputError(
+      'invalid_days',
+      'Choose between 1 and 7 days a week',
+    );
+  }
+  if (
+    p.salaryRwf != null &&
+    (!Number.isInteger(p.salaryRwf) ||
+      p.salaryRwf <= 0 ||
+      p.salaryRwf > MAX_SALARY_RWF)
+  ) {
+    throw new InvalidInputError(
+      'invalid_salary',
+      'Enter a monthly salary in RWF, or leave it blank',
+    );
+  }
+  return {
+    arrangement: p.arrangement,
+    daysPerWeek: p.daysPerWeek,
+    salaryRwf: p.salaryRwf ?? null,
+  };
 }

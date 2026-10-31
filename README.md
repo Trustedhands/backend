@@ -131,6 +131,16 @@ Every transition is recorded in `service_request_events`, which drives the progr
 
 When ops prices a request they also **hold** a worker. The worker must be verified, active and offer that service. Clients don't see the worker until it's **confirmed** after payment ("Confirm worker" moves the request to `ASSIGNED`). The platform fee comes from Settings, and placements are charged the match fee instead. "Suggested workers" ranks candidates by the matching priority in Settings: availability (clashing bookings, with a 30-minute buffer), language, gender, rating, and distance from the worker's GPS point to the address.
 
+### Long-term placements
+
+House help and long-term drivers are **placements**, not visits.
+
+- **Which services:** services with `feeType = MATCH` are always placements. `EITHER` services, such as Driver, let the client choose a visit or a placement.
+- **What the request carries:** a **start date** (`scheduledAt`), live-in or live-out, days per week, and optionally the monthly salary the client has in mind. There's no duration. The salary is agreed and paid directly between the client and the worker.
+- **Pricing:** ops holds a worker and the price is the **match fee** from Settings. No worker fee is charged, and on release the whole fee goes to the platform.
+- **Completion:** the client confirms the worker has started. Otherwise the release window counts from the start date.
+- **Matching:** a worker committed to a placement is unavailable for other placements, and for visits from the placement's start date.
+
 Admin actions such as verifications, settings changes and team changes are written to `audit_events`.
 
 ### Payments

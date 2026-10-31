@@ -274,7 +274,17 @@ export class ServiceRequestQueries {
         kind: row.kind,
         description: row.description,
         scheduledAt: row.scheduledAt,
-        durationHours: row.durationHours.toNumber(),
+        durationHours: row.durationHours?.toNumber() ?? null,
+        placement:
+          row.kind === 'PLACEMENT' &&
+          row.placementArrangement &&
+          row.placementDaysPerWeek
+            ? {
+                arrangement: row.placementArrangement,
+                daysPerWeek: row.placementDaysPerWeek,
+                salaryRwf: row.placementSalaryRwf,
+              }
+            : null,
         status: row.status,
         totalRwf: totalOf(row),
         worker,

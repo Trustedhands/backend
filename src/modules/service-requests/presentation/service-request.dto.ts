@@ -24,6 +24,24 @@ import {
   ServiceRequestStatus,
 } from '../domain/service-request.js';
 
+export class PlacementTermsDto {
+  @ApiProperty({ enum: ['LIVE_IN', 'LIVE_OUT'] })
+  @IsIn(['LIVE_IN', 'LIVE_OUT'])
+  arrangement: 'LIVE_IN' | 'LIVE_OUT';
+
+  @IsInt()
+  @Min(1)
+  @Max(7)
+  daysPerWeek: number;
+
+  /** Monthly salary the client has in mind (RWF); agreed directly with the worker */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10_000_000)
+  salaryRwf?: number;
+}
+
 export class CreateServiceRequestDto {
   /** Service type key from GET /v1/service-types */
   @IsString()
@@ -41,14 +59,21 @@ export class CreateServiceRequestDto {
   @MaxLength(2000)
   description: string;
 
-  /** Start date and time (ISO 8601, with offset) */
+  /** Visit start, or placement start date (ISO 8601, with offset) */
   @Type(() => Date)
   @IsDate()
   scheduledAt: Date;
 
-  /** Hours, in half-hour steps */
+  /** Visits: hours, in half-hour steps */
+  @IsOptional()
   @IsNumber()
-  durationHours: number;
+  durationHours?: number;
+
+  /** Placements: live-in or live-out, days per week, optional salary */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlacementTermsDto)
+  placement?: PlacementTermsDto;
 
   @ApiProperty({ enum: GenderPreference, default: GenderPreference.ANY })
   @IsOptional()

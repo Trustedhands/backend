@@ -235,4 +235,70 @@ describe('ServiceRequest', () => {
       },
     ]);
   });
+
+  describe('placements', () => {
+    const placement = (over: Partial<SubmitServiceRequest> = {}) =>
+      submission({
+        category: 'HOUSE_HELP',
+        kind: 'PLACEMENT',
+        durationHours: null,
+        placement: {
+          arrangement: 'LIVE_OUT',
+          daysPerWeek: 6,
+          salaryRwf: 80_000,
+        },
+        ...over,
+      });
+
+    it('takes a start date and terms instead of a duration', () => {
+      const request = ServiceRequest.submit(placement(), NOW);
+      expect(request.toSnapshot()).toMatchObject({
+        kind: 'PLACEMENT',
+        durationHours: null,
+        placement: {
+          arrangement: 'LIVE_OUT',
+          daysPerWeek: 6,
+          salaryRwf: 80_000,
+        },
+      });
+    });
+
+    it.each([
+      [{ placement: null }, 'placement_required'],
+      [
+        {
+          placement: {
+            arrangement: 'LIVE_OUT' as const,
+            daysPerWeek: 0,
+            salaryRwf: null,
+          },
+        },
+        'invalid_days',
+      ],
+      [
+        {
+          placement: {
+            arrangement: 'LIVE_IN' as const,
+            daysPerWeek: 5,
+            salaryRwf: -1,
+          },
+        },
+        'invalid_salary',
+      ],
+    ])('rejects %o', (over, code) => {
+      expect(() => ServiceRequest.submit(placement(over), NOW)).toThrow(
+        expect.objectContaining({ code }),
+      );
+    });
+
+    it('ignores any duration on a placement, and needs one on a visit', () => {
+      expect(
+        ServiceRequest.submit(placement({ durationHours: 4 }), NOW).toSnapshot()
+          .durationHours,
+      ).toBeNull();
+      expect(() =>
+        ServiceRequest.submit(submission({ durationHours: null }), NOW),
+      ).toThrow(expect.objectContaining({ code: 'invalid_duration' }));
+    });
+  });
 });

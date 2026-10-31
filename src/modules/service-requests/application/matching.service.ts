@@ -41,12 +41,14 @@ export class MatchingService {
       take: 200,
     });
     const ids = workers.map((w) => w.id);
+    const isPlacement = request.kind === 'PLACEMENT';
     const window = {
       start: request.scheduledAt,
-      hours: request.durationHours.toNumber(),
+      hours: request.durationHours?.toNumber() ?? 0,
     };
 
-    // Other bookings around the same day that could clash
+    // Visits around the same day that could clash, plus every committed placement
+    // (a worker placed long-term isn't free for anything else once it starts)
     const dayMs = 864e5;
     const [stats, bookings, settings] = await Promise.all([
       loadWorkerStats(this.prisma, ids),
@@ -55,16 +57,23 @@ export class MatchingService {
           assignedWorkerId: { in: ids },
           id: { not: request.id },
           status: { in: [...COMMITTED] },
-          scheduledAt: {
-            gte: new Date(request.scheduledAt.getTime() - dayMs),
-            lte: new Date(request.scheduledAt.getTime() + dayMs),
-          },
+          OR: [
+            { kind: 'PLACEMENT' },
+            {
+              kind: 'VISIT',
+              scheduledAt: {
+                gte: new Date(request.scheduledAt.getTime() - dayMs),
+                lte: new Date(request.scheduledAt.getTime() + dayMs),
+              },
+            },
+          ],
         },
         select: {
           assignedWorkerId: true,
           number: true,
           scheduledAt: true,
           durationHours: true,
+          kind: true,
         },
       }),
       this.config.settings(),
@@ -76,14 +85,21 @@ export class MatchingService {
         : null;
 
     const candidates = workers.map((w) => {
-      const clash = bookings.find(
-        (b) =>
-          b.assignedWorkerId === w.id &&
+      const clash = bookings.find((b) => {
+        if (b.assignedWorkerId !== w.id) return false;
+        if (b.kind === 'PLACEMENT') {
+          // Another placement always clashes with a placement; it blocks visits from its start date
+          return isPlacement || b.scheduledAt <= request.scheduledAt;
+        }
+        // Visits only matter for visits
+        return (
+          !isPlacement &&
           overlaps(window, {
             start: b.scheduledAt,
-            hours: b.durationHours.toNumber(),
-          }),
-      );
+            hours: b.durationHours?.toNumber() ?? 0,
+          })
+        );
+      });
       const { ratingAverage, completedJobs } = stats.get(w.id)!;
       return {
         id: w.id,

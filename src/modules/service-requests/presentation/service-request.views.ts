@@ -49,6 +49,14 @@ export class PaymentBriefView {
   completedAt: Date | null;
 }
 
+export class PlacementTermsView {
+  @ApiProperty({ enum: ['LIVE_IN', 'LIVE_OUT'] })
+  arrangement: 'LIVE_IN' | 'LIVE_OUT';
+  daysPerWeek: number;
+  /** Monthly salary the client has in mind; agreed between them and the worker */
+  salaryRwf: number | null;
+}
+
 export class ServiceRequestSummaryView {
   id: string;
   /** e.g. SR-2048 */
@@ -60,8 +68,12 @@ export class ServiceRequestSummaryView {
   @ApiProperty({ enum: ['VISIT', 'PLACEMENT'] })
   kind: 'VISIT' | 'PLACEMENT';
   description: string;
+  /** Visit start, or placement start date */
   scheduledAt: Date;
-  durationHours: number;
+  /** Visits only */
+  durationHours: number | null;
+  /** Placements only */
+  placement: PlacementTermsView | null;
   @ApiProperty({ enum: ServiceRequestStatus })
   status: ServiceRequestStatus;
   totalRwf: number | null;

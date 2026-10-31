@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MinLength,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -14,8 +16,37 @@ export class Env {
   @IsNotEmpty()
   DATABASE_URL: string;
 
-  @IsUrl({ require_tld: false })
-  SUPABASE_URL: string;
+  @IsIn(['development', 'test', 'production'])
+  NODE_ENV: 'development' | 'test' | 'production' = 'development';
+
+  /** HS256 key for access tokens */
+  @IsString()
+  @MinLength(32)
+  JWT_SECRET: string;
+
+  /** How emails (incl. verification codes) are sent; "log" is for development only */
+  @IsIn(['log', 'resend'])
+  EMAIL_PROVIDER: 'log' | 'resend' = 'log';
+
+  @ValidateIf((env: Env) => env.EMAIL_PROVIDER === 'resend')
+  @IsString()
+  @IsNotEmpty()
+  RESEND_API_KEY?: string;
+
+  /** Verified sending domain in Resend, e.g. trustedhands.rw */
+  @ValidateIf((env: Env) => env.EMAIL_PROVIDER === 'resend' && !env.EMAIL_FROM)
+  @IsString()
+  @IsNotEmpty()
+  EMAIL_DOMAIN?: string;
+
+  /** Optional full sender, e.g. "TrustedHands <hello@trustedhands.rw>" */
+  @IsOptional()
+  @IsString()
+  EMAIL_FROM?: string;
+
+  /** How phone codes are delivered; "log" is for development only */
+  @IsIn(['log'])
+  SMS_PROVIDER = 'log' as const;
 
   @IsInt()
   PORT: number = 3000;
@@ -61,6 +92,14 @@ export function validateEnv(raw: Record<string, unknown>): Env {
       )
       .join('\n  ');
     throw new Error(`Invalid environment configuration:\n  ${details}`);
+  }
+  if (
+    env.NODE_ENV === 'production' &&
+    (env.EMAIL_PROVIDER === 'log' || env.SMS_PROVIDER === 'log')
+  ) {
+    throw new Error(
+      'EMAIL_PROVIDER and SMS_PROVIDER must be real providers in production: "log" would print verification codes to the logs',
+    );
   }
   return env;
 }

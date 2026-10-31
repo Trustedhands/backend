@@ -8,7 +8,8 @@ TrustedHands is **ops-mediated**. Clients describe a job, the TrustedHands team 
 
 - **NestJS 12** (ESM), domain-driven layout
 - **Prisma 7** with the `pg` driver adapter, on **Supabase Postgres**
-- **Supabase Auth**: the frontends sign users in; the API verifies the access tokens against the project's JWKS
+- **Own JWT auth**: email + password, short-lived access tokens, rotating refresh tokens in an httpOnly cookie (see [Authentication](#authentication))
+- **Resend** for email (verification and password-reset codes)
 - **MTN MoMo Collections API** for payments
 - Vitest (unit + e2e), oxlint, Prettier
 
@@ -23,7 +24,7 @@ pnpm start:dev        # http://localhost:3000
 
 - API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from.
 - Health check: `GET /health`
-- All other routes are under `/v1` and need `Authorization: Bearer <supabase access token>`.
+- All other routes are under `/v1` and need `Authorization: Bearer <access token>` (from `/v1/auth/login` or `/v1/auth/register`).
 
 ### Database connections
 
@@ -38,11 +39,35 @@ All app tables live in the **`app` schema**, not `public`. Supabase's Data API (
 
 ### Making someone an admin
 
-Admins are ordinary Supabase Auth users whose profile has `role = ADMIN`. After they've signed up:
+Admins are ordinary accounts whose profile has `role = ADMIN`. After they've registered:
 
 ```bash
-pnpm admin:promote ops@example.com "Ops Name"
+pnpm admin:promote ops@example.com
 ```
+
+## Authentication
+
+| Endpoint (under `/v1/auth`)            | What it does                                                         |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| `POST register`                        | Creates the account and its client profile, emails a code, signs in  |
+| `POST login`                           | Email + password                                                     |
+| `POST refresh`                         | Rotates the refresh cookie, returns a new access token               |
+| `POST logout`                          | Revokes this device's session                                        |
+| `POST email/send-code`, `email/verify` | Email verification by 6-digit code                                   |
+| `POST phone/send-code`, `phone/verify` | Phone verification by SMS code                                       |
+| `POST password/forgot`, `password/reset` | Reset by emailed code; signs out every other session              |
+| `POST password/change`                 | Needs the current password; signs out other sessions                 |
+
+How it works:
+
+- **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 15 minutes. They carry only the user id; the role is read from the database on each admin request, so revoking it takes effect immediately.
+- **Refresh tokens** are random, valid for 30 days, and stored only as SHA-256 hashes. They're set as an `httpOnly`, `SameSite=Lax` cookie scoped to `/v1/auth`, and are `Secure` in production. Every refresh rotates the token. Presenting an already-rotated token is treated as theft and revokes that whole session chain.
+- **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
+- **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
+- **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
+- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, configure Express `trust proxy` so the limits apply to client IPs.
+- **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
+- **SMS** only logs codes for now (`SMS_PROVIDER=log`). The server refuses to start in production until a real provider is added.
 
 ## Architecture
 
@@ -50,7 +75,7 @@ pnpm admin:promote ops@example.com "Ops Name"
 src/
   config/            env validation
   shared/
-    auth/            Supabase JWT guard (global), @Public(), @Roles(), @CurrentUser()
+    auth/            access tokens, global guard, @Public(), @Roles(), @CurrentUser()
     database/        PrismaService
     domain/          DomainError hierarchy (mapped to HTTP by DomainExceptionFilter)
     http/            filters, shared DTOs
@@ -63,7 +88,8 @@ src/
 
 Bounded contexts:
 
-- **identity**: client profile and home address. Email and phone verification state is read from `auth.users`.
+- **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
+- **identity**: client profile and home address.
 - **workers**: admin-managed worker records, plus rating and job stats.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
@@ -101,8 +127,8 @@ The MoMo sandbox only accepts `EUR` and its own test numbers. Set `MOMO_TARGET_E
 
 ```bash
 pnpm test       # unit tests (domain)
-pnpm test:e2e   # full lifecycle against the database in .env; cleans up after itself
+pnpm test:e2e   # auth + full lifecycle against the database in .env; cleans up after itself
 pnpm lint && pnpm typecheck
 ```
 
-The e2e suite fakes only the token verifier and the MoMo gateway.
+The e2e suites use real auth; only email, SMS and MoMo are faked (see `test/support.ts`).

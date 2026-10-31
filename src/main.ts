@@ -16,6 +16,8 @@ async function bootstrap() {
       .split(',')
       .map((o) => o.trim())
       .filter(Boolean),
+    // The refresh token travels as an httpOnly cookie
+    credentials: true,
   });
   app.enableShutdownHooks();
   SwaggerModule.setup('docs', app, buildOpenApiDocument(app), {

@@ -2,14 +2,13 @@ import { Injectable } from '@nestjs/common';
 import type { Profile } from '../../../generated/prisma/client.js';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
 import {
-  ConflictError,
   InvalidInputError,
+  NotFoundError,
 } from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
 import type { AddressDto } from '../../../shared/http/address.dto.js';
-import { loadAuthUsers } from '../infrastructure/auth-users.js';
+import { maskMsisdn } from '../../payments/domain/msisdn.js';
 import type {
-  CreateProfileDto,
   MeView,
   ProfileView,
   UpdateProfileDto,
@@ -20,21 +19,29 @@ export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async me(user: AuthUser): Promise<MeView> {
-    const [profile, auth, home] = await Promise.all([
-      this.prisma.profile.findUnique({ where: { id: user.id } }),
-      loadAuthUsers(this.prisma, [user.id]).then((m) => m.get(user.id)),
+    const [account, home, methods] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: user.id },
+        include: { profile: true },
+      }),
       this.prisma.address.findFirst({
         where: { profileId: user.id, isDefault: true },
       }),
+      this.prisma.savedPaymentMethod.findMany({
+        where: { profileId: user.id },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      }),
     ]);
+    if (!account?.profile) {
+      throw new NotFoundError('account_not_found', 'Account not found');
+    }
     return {
       id: user.id,
-      email: auth?.email ?? user.email,
-      phone: auth?.phone ?? user.phone,
-      emailVerified: Boolean(auth?.emailConfirmedAt),
-      phoneVerified: Boolean(auth?.phoneConfirmedAt),
-      onboarded: profile !== null,
-      profile: profile ? toProfileView(profile) : null,
+      email: account.email,
+      phone: account.phone,
+      emailVerified: account.emailVerifiedAt !== null,
+      phoneVerified: account.phoneVerifiedAt !== null,
+      profile: toProfileView(account.profile),
       homeAddress: home
         ? {
             district: home.district,
@@ -44,27 +51,13 @@ export class ProfilesService {
             longitude: home.longitude,
           }
         : null,
+      paymentMethods: methods.map((m) => ({
+        id: m.id,
+        msisdn: m.msisdn,
+        msisdnMasked: maskMsisdn(m.msisdn),
+        isDefault: m.isDefault,
+      })),
     };
-  }
-
-  async create(user: AuthUser, dto: CreateProfileDto): Promise<MeView> {
-    const existing = await this.prisma.profile.findUnique({
-      where: { id: user.id },
-      select: { id: true },
-    });
-    if (existing) {
-      throw new ConflictError('profile_exists', 'Your profile already exists');
-    }
-    await this.prisma.profile.create({
-      data: {
-        id: user.id,
-        accountType: dto.accountType,
-        fullName: dto.fullName.trim(),
-        companyName:
-          dto.accountType === 'COMPANY' ? dto.companyName?.trim() : null,
-      },
-    });
-    return this.me(user);
   }
 
   async update(user: AuthUser, dto: UpdateProfileDto): Promise<MeView> {
@@ -115,13 +108,13 @@ export class ProfilesService {
     return this.me(user);
   }
 
-  /** Clients must finish sign-up step 1 before using the rest of the app. */
+  /** Every account gets a profile at registration; this guards stale tokens. */
   async require(userId: string): Promise<Profile> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: userId },
     });
     if (!profile) {
-      throw new ConflictError('profile_required', 'Finish signing up first');
+      throw new NotFoundError('account_not_found', 'Account not found');
     }
     return profile;
   }

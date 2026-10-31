@@ -8,14 +8,14 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { AuthUser } from './auth-user.js';
 import { IS_PUBLIC } from './decorators.js';
-import { SupabaseTokenVerifier } from './supabase-token.verifier.js';
+import { AccessTokens } from './access-tokens.js';
 
-/** Global guard: every route needs a valid Supabase access token unless marked @Public(). */
+/** Global guard: every route needs a valid access token unless marked @Public(). */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly verifier: SupabaseTokenVerifier,
+    private readonly tokens: AccessTokens,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,7 +34,7 @@ export class AuthGuard implements CanActivate {
     }
 
     try {
-      request.user = await this.verifier.verify(token);
+      request.user = await this.tokens.verify(token);
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }

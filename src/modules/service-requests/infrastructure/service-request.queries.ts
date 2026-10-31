@@ -6,7 +6,6 @@ import {
   formatReceiptRef,
   formatRequestRef,
 } from '../../../shared/http/references.js';
-import { loadAuthUsers } from '../../identity/infrastructure/auth-users.js';
 import { loadWorkerStats } from '../../workers/infrastructure/worker-stats.js';
 import {
   ACTIVE_STATUSES,
@@ -46,6 +45,28 @@ const detailInclude = {
   },
   review: { select: { id: true } },
 } satisfies Prisma.ServiceRequestInclude;
+
+const clientSelect = {
+  id: true,
+  fullName: true,
+  user: { select: { email: true, phone: true } },
+} satisfies Prisma.ProfileSelect;
+
+type ClientRow = Prisma.ProfileGetPayload<{ select: typeof clientSelect }>;
+
+function toContacts(clients: ClientRow[]): Map<string, ClientContactView> {
+  return new Map(
+    clients.map((c) => [
+      c.id,
+      {
+        id: c.id,
+        fullName: c.fullName,
+        email: c.user.email,
+        phone: c.user.phone,
+      },
+    ]),
+  );
+}
 
 type SummaryRow = Prisma.ServiceRequestGetPayload<{
   include: typeof summaryInclude;
@@ -107,7 +128,7 @@ export class ServiceRequestQueries {
         orderBy: { createdAt: 'asc' },
         include: {
           ...summaryInclude,
-          client: { select: { id: true, fullName: true } },
+          client: { select: clientSelect },
         },
         skip: filter.skip,
         take: filter.take,
@@ -116,7 +137,7 @@ export class ServiceRequestQueries {
     ]);
     const [summaries, contacts] = await Promise.all([
       this.toSummaries(rows),
-      this.loadContacts(rows.map((r) => r.client)),
+      toContacts(rows.map((r) => r.client)),
     ]);
     return {
       items: summaries.map((s, i) => ({
@@ -132,14 +153,14 @@ export class ServiceRequestQueries {
       where: { id },
       include: {
         ...detailInclude,
-        client: { select: { id: true, fullName: true } },
+        client: { select: clientSelect },
       },
     });
     if (!row)
       throw new NotFoundError('service_request_not_found', 'Request not found');
     const [detail, contacts] = await Promise.all([
       this.toDetail(row),
-      this.loadContacts([row.client]),
+      toContacts([row.client]),
     ]);
     return {
       ...detail,
@@ -219,26 +240,6 @@ export class ServiceRequestQueries {
       hasPendingPayment: row.payments.some((p) => p.status === 'PENDING'),
       hasReview: row.review !== null,
     };
-  }
-
-  private async loadContacts(
-    clients: { id: string; fullName: string }[],
-  ): Promise<Map<string, ClientContactView>> {
-    const auth = await loadAuthUsers(
-      this.prisma,
-      clients.map((c) => c.id),
-    );
-    return new Map(
-      clients.map((c) => [
-        c.id,
-        {
-          id: c.id,
-          fullName: c.fullName,
-          email: auth.get(c.id)?.email ?? null,
-          phone: auth.get(c.id)?.phone ?? null,
-        },
-      ]),
-    );
   }
 }
 

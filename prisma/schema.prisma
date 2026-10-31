@@ -2,8 +2,9 @@
 //
 // Tables live in the `app` schema rather than `public` so Supabase's Data API
 // (PostgREST, reachable with the public anon key) cannot see them. All access
-// goes through the NestJS API. User identities live in Supabase Auth
-// (`auth.users`); `Profile.id` is the same UUID.
+// goes through the NestJS API, which also owns authentication (`users`,
+// `refresh_tokens`, `verification_codes`). `Profile.id` is the same UUID as
+// `User.id`.
 //
 // Money is stored as whole Rwandan francs (RWF has no minor unit in practice).
 
@@ -69,8 +70,82 @@ enum IdDocumentType {
   @@schema("app")
 }
 
+/// Login credentials and contact verification. Profile holds everything else.
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased
+  email           String    @unique
+  /// scrypt$N$r$p$salt$hash
+  passwordHash    String
+  /// E.164, e.g. +250781234567
+  phone           String?
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  profile           Profile?
+  refreshTokens     RefreshToken[]
+  verificationCodes VerificationCode[]
+
+  @@index([phone])
+  @@map("users")
+  @@schema("app")
+}
+
+/// Opaque, rotating refresh tokens. Each login starts a family; reusing a
+/// rotated token revokes the whole family (likely theft).
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  familyId  String    @db.Uuid
+  /// SHA-256 of the token; the token itself is never stored
+  tokenHash String    @unique
+  expiresAt DateTime
+  /// Set when rotated (exchanged for a new token)
+  usedAt    DateTime?
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+  @@schema("app")
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PHONE_VERIFY
+  PASSWORD_RESET
+
+  @@schema("app")
+}
+
+/// One-time 6-digit codes, stored hashed.
+model VerificationCode {
+  id         String              @id @default(uuid()) @db.Uuid
+  userId     String              @db.Uuid
+  purpose    VerificationPurpose
+  /// The email or phone the code was sent to
+  target     String
+  codeHash   String
+  attempts   Int                 @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt])
+  @@map("verification_codes")
+  @@schema("app")
+}
+
 model Profile {
-  /// Same UUID as auth.users.id
+  /// Same UUID as User.id
   id                 String      @id @db.Uuid
   role               UserRole    @default(CLIENT)
   accountType        AccountType @default(INDIVIDUAL)
@@ -89,6 +164,7 @@ model Profile {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
+  user            User                 @relation(fields: [id], references: [id], onDelete: Cascade)
   addresses       Address[]
   kycSubmissions  KycSubmission[]
   paymentMethods  SavedPaymentMethod[]
@@ -221,15 +297,15 @@ enum GenderPreference {
 }
 
 model ServiceRequest {
-  id                 String               @id @default(uuid()) @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
   /// Human-readable sequence, shown as SR-<number>
-  number             Int                  @unique @default(autoincrement())
-  clientId           String               @db.Uuid
+  number             Int              @unique @default(autoincrement())
+  clientId           String           @db.Uuid
   category           ServiceCategory
   description        String
   scheduledAt        DateTime
-  durationHours      Decimal              @db.Decimal(4, 1)
-  preferredGender    GenderPreference     @default(ANY)
+  durationHours      Decimal          @db.Decimal(4, 1)
+  preferredGender    GenderPreference @default(ANY)
   preferredLanguages Language[]
 
   // Address snapshot, so later edits to the client's address don't rewrite history

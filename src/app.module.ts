@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.js';
 import { HealthController } from './health/health.controller.js';
+import { AuthAccountsModule } from './modules/auth/auth.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module.js';
@@ -18,6 +19,7 @@ import { DatabaseModule } from './shared/database/database.module.js';
     }),
     DatabaseModule,
     AuthModule,
+    AuthAccountsModule,
     IdentityModule,
     WorkersModule,
     ServiceRequestsModule,

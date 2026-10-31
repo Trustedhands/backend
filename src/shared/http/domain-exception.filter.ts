@@ -8,6 +8,7 @@ import type { Response } from 'express';
 import { DomainError } from '../domain/domain-error.js';
 
 const STATUS_BY_KIND: Record<DomainError['kind'], HttpStatus> = {
+  unauthorized: HttpStatus.UNAUTHORIZED,
   not_found: HttpStatus.NOT_FOUND,
   conflict: HttpStatus.CONFLICT,
   invalid: HttpStatus.UNPROCESSABLE_ENTITY,

@@ -43,7 +43,15 @@ const detailInclude = {
       completedAt: true,
     },
   },
-  review: { select: { id: true } },
+  review: {
+    select: {
+      id: true,
+      rating: true,
+      tags: true,
+      comment: true,
+      createdAt: true,
+    },
+  },
 } satisfies Prisma.ServiceRequestInclude;
 
 const clientSelect = {
@@ -239,6 +247,7 @@ export class ServiceRequestQueries {
         : null,
       hasPendingPayment: row.payments.some((p) => p.status === 'PENDING'),
       hasReview: row.review !== null,
+      review: row.review,
     };
   }
 }

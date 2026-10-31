@@ -468,16 +468,27 @@ model Voucher {
 
 // ─── Reviews & support ──────────────────────────────────────────────────────
 
+enum ReviewTag {
+  ON_TIME
+  THOROUGH
+  FRIENDLY
+  RESPECTFUL
+  COMMUNICATED_WELL
+
+  @@schema("app")
+}
+
 model Review {
-  id               String   @id @default(uuid()) @db.Uuid
-  serviceRequestId String   @unique @db.Uuid
-  clientId         String   @db.Uuid
-  workerId         String   @db.Uuid
-  rating           Int      @db.SmallInt
-  /// e.g. on_time, thorough, friendly, respectful, communicated_well
-  tags             String[]
+  id               String      @id @default(uuid()) @db.Uuid
+  serviceRequestId String      @unique @db.Uuid
+  clientId         String      @db.Uuid
+  workerId         String      @db.Uuid
+  rating           Int         @db.SmallInt
+  /// "What stood out?"
+  tags             ReviewTag[]
+  /// Shared with the worker by the ops team
   comment          String?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime    @default(now())
 
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id])
   client         Profile        @relation(fields: [clientId], references: [id])
@@ -489,7 +500,9 @@ model Review {
 }
 
 enum TicketStatus {
+  /// Received, not yet picked up
   OPEN
+  /// Ops is working on it
   ACTIVE
   CLOSED
 
@@ -502,18 +515,38 @@ model SupportTicket {
   number           Int          @unique @default(autoincrement())
   clientId         String       @db.Uuid
   serviceRequestId String?      @db.Uuid
+  /// Derived from the description at creation; ops can rename it
   subject          String
   description      String
-  attachmentPaths  String[]
   status           TicketStatus @default(OPEN)
+  closedAt         DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  client         Profile         @relation(fields: [clientId], references: [id])
-  serviceRequest ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  client         Profile            @relation(fields: [clientId], references: [id])
+  serviceRequest ServiceRequest?    @relation(fields: [serviceRequestId], references: [id])
+  attachments    TicketAttachment[]
 
   @@index([clientId, createdAt])
   @@index([status])
   @@map("support_tickets")
+  @@schema("app")
+}
+
+/// Photos/documents attached to a ticket. Stored in Postgres for the MVP
+/// (small, capped files); see AttachmentStore to move them to object storage.
+model TicketAttachment {
+  id          String   @id @default(uuid()) @db.Uuid
+  ticketId    String   @db.Uuid
+  filename    String
+  contentType String
+  sizeBytes   Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
   @@schema("app")
 }

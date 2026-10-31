@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsEmail,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -43,6 +44,11 @@ export class Env {
   @IsOptional()
   @IsString()
   EMAIL_FROM?: string;
+
+  /** Ops inbox for new support tickets and low ratings (optional) */
+  @IsOptional()
+  @IsEmail()
+  SUPPORT_INBOX?: string;
 
   /** How phone codes are delivered; "log" is for development only */
   @IsIn(['log', 'africastalking'])

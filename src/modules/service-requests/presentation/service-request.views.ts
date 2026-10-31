@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ReviewView } from '../../reviews/presentation/review.dto.js';
 import {
   GenderPreference,
   Language,
@@ -79,6 +80,8 @@ export class ServiceRequestDetailView extends ServiceRequestSummaryView {
   payment: PaymentBriefView | null;
   hasPendingPayment: boolean;
   hasReview: boolean;
+  /** The client's review, once submitted */
+  review: ReviewView | null;
 }
 
 export class ClientContactView {

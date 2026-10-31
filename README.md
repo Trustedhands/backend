@@ -94,6 +94,8 @@ Bounded contexts:
 - **workers**: admin-managed worker records, plus rating and job stats.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
+- **reviews**: clients rate the worker on a completed job, once per job. Ratings of 2 or below are emailed to `SUPPORT_INBOX`.
+- **support**: "Report an issue" tickets (`OPEN → ACTIVE → CLOSED`, reopenable), each optionally linked to a booking. New tickets are emailed to `SUPPORT_INBOX`.
 
 Contexts with real invariants (service requests, payments) use aggregates, repositories and optimistic locking. The CRUD-shaped ones (identity, workers) use Prisma directly from the application service. Reads go through query services that shape rows into views, separate from the command path.
 
@@ -135,3 +137,11 @@ pnpm lint && pnpm typecheck
 ```
 
 The e2e suites use real auth; only email, SMS and MoMo are faked (see `test/support.ts`).
+
+### Ticket attachments
+
+Clients can attach up to 3 files of up to 5 MB each.
+
+- **Allowed types:** JPG, PNG or PDF. The type is detected from the file's bytes, never from its name or the type the browser claims.
+- **Storage:** files are stored in Postgres (`ticket_attachments`). That's fine at MVP volumes. To move them to object storage, change only `SupportService.create` and `SupportService.attachment`.
+- **Serving:** files are served with `nosniff` and `Content-Security-Policy: sandbox`, so an uploaded file can't run script on the API's origin.

@@ -4,9 +4,11 @@ import type { Env } from '../../../config/env.js';
 import {
   ConflictError,
   NotFoundError,
+  UnavailableError,
 } from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
 import { formatRequestRef } from '../../../shared/http/references.js';
+import { ConfigurationService } from '../../configuration/application/configuration.service.js';
 import { ServiceRequestRepository } from '../../service-requests/domain/service-request.repository.js';
 import { normalizeMsisdn } from '../domain/msisdn.js';
 import { Payment } from '../domain/payment.js';
@@ -35,6 +37,7 @@ export class PaymentsService {
     private readonly requests: ServiceRequestRepository,
     private readonly gateway: MobileMoneyGateway,
     private readonly config: ConfigService<Env, true>,
+    private readonly settings: ConfigurationService,
   ) {}
 
   /** "Accept & pay": charges the request's current price via MoMo. */
@@ -46,6 +49,13 @@ export class PaymentsService {
     const strict =
       this.config.get('MOMO_TARGET_ENVIRONMENT', { infer: true }) !== 'sandbox';
     const msisdn = normalizeMsisdn(rawMsisdn, strict);
+    // Ops can pause payments from Settings (e.g. during a MoMo outage)
+    if (!(await this.settings.settings()).momoEnabled) {
+      throw new UnavailableError(
+        'payments_paused',
+        'Mobile Money payments are paused right now. Please try again later.',
+      );
+    }
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       // Serialise payment attempts (and price changes) for this request

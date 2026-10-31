@@ -388,7 +388,6 @@ model PlatformSettings {
   /// Ordered criteria for suggested workers: AVAILABILITY, LANGUAGE, GENDER, RATING, DISTANCE
   matchingPriority    String[] @default(["AVAILABILITY", "LANGUAGE", "GENDER", "RATING", "DISTANCE"])
   momoEnabled         Boolean  @default(true)
-  cardEnabled         Boolean  @default(false)
   clientWalletEnabled Boolean  @default(false)
   vouchersEnabled     Boolean  @default(false)
   updatedAt           DateTime @updatedAt

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigurationModule } from '../configuration/configuration.module.js';
 import { ServiceRequestsModule } from '../service-requests/service-requests.module.js';
 import { MobileMoneyGateway } from './application/mobile-money.gateway.js';
 import { PaymentsService } from './application/payments.service.js';
@@ -12,7 +13,7 @@ import {
 } from './presentation/payments.controller.js';
 
 @Module({
-  imports: [ServiceRequestsModule],
+  imports: [ServiceRequestsModule, ConfigurationModule],
   controllers: [PaymentsController, MomoWebhookController],
   providers: [
     PaymentsService,

@@ -107,7 +107,7 @@ Bounded contexts:
 - **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and **two-admin verification**. Whoever added a worker can't verify them, and every ID check must be ticked. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
-- **configuration**: platform settings (fees, release rule, matching priority, payment-method toggles) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
+- **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
 - **team**: staff roles, invitations, and removing access.
 - **operations**: dashboard figures, global search and the clients list.
 - **reviews**: clients rate the worker on a completed job, once per job. Ratings of 2 or below are emailed to `SUPPORT_INBOX`.

@@ -285,6 +285,46 @@ describe('Admin console (e2e)', () => {
         .expect(422);
     });
 
+    it('pausing MoMo stops new payments until it is switched back on', async () => {
+      const id = await newRequest();
+      const workerId = await createVerifiedWorker(t);
+      workerIds.push(workerId);
+      await t
+        .http()
+        .post(`/v1/admin/service-requests/${id}/price`)
+        .set(bearer(superAdmin))
+        .send({ workerFeeRwf: 10000, workerId })
+        .expect(200);
+      await t
+        .http()
+        .patch('/v1/admin/settings')
+        .set(bearer(superAdmin))
+        .send({ momoEnabled: false })
+        .expect(200);
+      try {
+        await t
+          .http()
+          .post(`/v1/service-requests/${id}/payments`)
+          .set(bearer(client))
+          .send({ msisdn: '0781234567' })
+          .expect(502)
+          .expect((r) => expect(r.body.code).toBe('payments_paused'));
+      } finally {
+        await t
+          .http()
+          .patch('/v1/admin/settings')
+          .set(bearer(superAdmin))
+          .send({ momoEnabled: true })
+          .expect(200);
+      }
+      await t
+        .http()
+        .post(`/v1/service-requests/${id}/payments`)
+        .set(bearer(client))
+        .send({ msisdn: '0781234567' })
+        .expect(201);
+    });
+
     it('adds and hides services; clients only see and request visible ones', async () => {
       const key = `E2E_${randomUUID().slice(0, 8).toUpperCase().replace(/-/g, '')}`;
       serviceKeys.push(key);

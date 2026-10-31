@@ -172,7 +172,6 @@ function toSettingsView(s: PlatformSettings): SettingsView {
     releaseAfterHours: s.releaseAfterHours,
     matchingPriority: s.matchingPriority as MatchingCriterion[],
     momoEnabled: s.momoEnabled,
-    cardEnabled: s.cardEnabled,
     clientWalletEnabled: s.clientWalletEnabled,
     vouchersEnabled: s.vouchersEnabled,
     updatedAt: s.updatedAt,

@@ -34,8 +34,8 @@ export class SettingsView {
   releaseAfterHours: number;
   @ApiProperty({ enum: MATCHING_CRITERIA, isArray: true })
   matchingPriority: MatchingCriterion[];
+  /** MTN MoMo is the only payment method; turning it off pauses new payments */
   momoEnabled: boolean;
-  cardEnabled: boolean;
   clientWalletEnabled: boolean;
   vouchersEnabled: boolean;
   updatedAt: Date;
@@ -71,10 +71,6 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
   momoEnabled?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  cardEnabled?: boolean;
 
   @IsOptional()
   @IsBoolean()

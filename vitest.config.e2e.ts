@@ -9,7 +9,9 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
-    // Hits the real database over the network
+    // Hits the real database over the network. One file at a time keeps the
+    // number of pooled connections to Supabase low.
+    fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 60_000,
   },

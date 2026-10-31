@@ -1,7 +1,9 @@
 import {
   bearer,
   createTestApp,
+  createVerifiedWorker,
   deleteUsers,
+  makeStaff,
   registerUser,
   type TestApp,
   type TestUser,
@@ -22,11 +24,11 @@ describe('Service request lifecycle (e2e)', () => {
   beforeAll(async () => {
     t = await createTestApp();
     client = await registerUser(t, { fullName: 'Claire Dubois' });
-    admin = await registerUser(t, { fullName: 'E2E Admin' });
-    await t.prisma.profile.update({
-      where: { id: admin.id },
-      data: { role: 'ADMIN' },
-    });
+    admin = await makeStaff(
+      t,
+      await registerUser(t, { fullName: 'E2E Admin' }),
+    );
+    workerId = await createVerifiedWorker(t, { languages: ['EN', 'FR', 'RW'] });
   });
 
   afterAll(async () => {
@@ -91,7 +93,7 @@ describe('Service request lifecycle (e2e)', () => {
     await http()
       .post(`/v1/admin/service-requests/${id}/price`)
       .set(as(admin))
-      .send({ workerFeeRwf: 20_000, serviceFeeRwf: 1_000, total: 1 })
+      .send({ workerFeeRwf: 20_000, workerId, total: 1 })
       .expect(400);
 
     // Ops sees it in the queue and prices it
@@ -104,32 +106,28 @@ describe('Service request lifecycle (e2e)', () => {
     const priced = await http()
       .post(`/v1/admin/service-requests/${id}/price`)
       .set(as(admin))
-      .send({ workerFeeRwf: 20_000, serviceFeeRwf: 1_000 })
+      .send({ workerFeeRwf: 20_000, workerId })
       .expect(200);
+    // The platform fee comes from Settings (1,000 RWF by default)
     expect(priced.body).toMatchObject({
       status: 'PRICED',
       totalRwf: 21_000,
+      quote: { workerFeeRwf: 20_000, serviceFeeRwf: 1_000 },
       client: { fullName: 'Claire Dubois' },
+      worker: { id: workerId },
     });
+    // The client doesn't see the held worker yet
+    const clientView = await http()
+      .get(`/v1/service-requests/${id}`)
+      .set(as(client))
+      .expect(200);
+    expect(clientView.body.worker).toBeNull();
 
-    // Can't assign a worker before payment
-    const worker = await http()
-      .post('/v1/admin/workers')
-      .set(as(admin))
-      .send({
-        fullName: 'Jeanne Mukamana',
-        phone: '+250788000111',
-        gender: 'FEMALE',
-        languages: ['EN', 'FR', 'RW'],
-        categories: ['CLEANING'],
-        idVerified: true,
-      })
-      .expect(201);
-    workerId = worker.body.id;
+    // Can't confirm the worker before payment
     await http()
       .post(`/v1/admin/service-requests/${id}/assign`)
       .set(as(admin))
-      .send({ workerId })
+      .send({})
       .expect(409);
 
     // Client accepts and pays
@@ -154,7 +152,7 @@ describe('Service request lifecycle (e2e)', () => {
     await http()
       .post(`/v1/admin/service-requests/${id}/price`)
       .set(as(admin))
-      .send({ workerFeeRwf: 1, serviceFeeRwf: 1 })
+      .send({ workerFeeRwf: 1, workerId })
       .expect(409)
       .expect((res) => expect(res.body.code).toBe('payment_in_progress'));
 
@@ -179,11 +177,11 @@ describe('Service request lifecycle (e2e)', () => {
     expect(paid.body.payment.receiptReference).toMatch(/^RC-\d+$/);
     expect(paid.body.hasPendingPayment).toBe(false);
 
-    // Ops assigns the worker, client sees them, then marks the job done
+    // Ops confirms the held worker, client sees them, then marks the job done
     await http()
       .post(`/v1/admin/service-requests/${id}/assign`)
       .set(as(admin))
-      .send({ workerId })
+      .send({})
       .expect(200);
     const assigned = await http()
       .get(`/v1/service-requests/${id}`)

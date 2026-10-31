@@ -123,6 +123,10 @@ export class Sessions {
     const refreshExpiresAt = new Date(
       Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
     );
+    await db.user.update({
+      where: { id: userId },
+      data: { lastActiveAt: new Date() },
+    });
     await db.refreshToken.create({
       data: {
         userId,

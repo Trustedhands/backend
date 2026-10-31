@@ -45,6 +45,10 @@ export class Env {
   @IsString()
   EMAIL_FROM?: string;
 
+  /** Admin console origin, used in staff invitation links */
+  @IsUrl({ require_tld: false })
+  ADMIN_APP_URL: string = 'http://localhost:3002';
+
   /** Ops inbox for new support tickets and low ratings (optional) */
   @IsOptional()
   @IsEmail()

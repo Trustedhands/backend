@@ -29,6 +29,16 @@ enum UserRole {
   @@schema("app")
 }
 
+/// What an ADMIN may do; see shared/auth/permissions.ts
+enum StaffRole {
+  SUPER_ADMIN
+  VERIFICATION_LEAD
+  FINANCE
+  CUSTOMER_SERVICE
+
+  @@schema("app")
+}
+
 enum AccountType {
   INDIVIDUAL
   COMPANY
@@ -81,6 +91,8 @@ model User {
   phone           String?
   emailVerifiedAt DateTime?
   phoneVerifiedAt DateTime?
+  /// Bumped when a session is issued or refreshed ("Last active")
+  lastActiveAt    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -148,6 +160,10 @@ model Profile {
   /// Same UUID as User.id
   id                 String      @id @db.Uuid
   role               UserRole    @default(CLIENT)
+  /// Set for ADMIN profiles
+  staffRole          StaffRole?
+  /// Staff access removed; the account can no longer use admin endpoints
+  staffDisabledAt    DateTime?
   accountType        AccountType @default(INDIVIDUAL)
   fullName           String
   companyName        String?
@@ -173,6 +189,9 @@ model Profile {
   walletEntries   WalletEntry[]
   reviews         Review[]
   tickets         SupportTicket[]
+  assignedTickets SupportTicket[]      @relation("TicketAssignee")
+  ticketNotes     TicketNote[]
+  ticketMessages  TicketMessage[]
 
   @@map("profiles")
   @@schema("app")
@@ -236,36 +255,181 @@ model SavedPaymentMethod {
 
 // ─── Workers (managed by admins; there is no worker app) ────────────────────
 
-enum ServiceCategory {
-  CLEANING
-  COOKING
-  ERRANDS
-  REPAIRS
-  LAUNDRY
-  DRIVER
-  OTHER
+enum WorkerStatus {
+  /// Saved but not yet sent to verification
+  DRAFT
+  PENDING_VERIFICATION
+  /// Checked by a second admin; can be assigned to jobs
+  VERIFIED
+  DECLINED
+
+  @@schema("app")
+}
+
+enum WorkerDocumentKind {
+  PHOTO
+  ID_FRONT
+  ID_BACK
 
   @@schema("app")
 }
 
 model Worker {
-  id         String            @id @default(uuid()) @db.Uuid
-  fullName   String
-  phone      String
-  gender     Gender
-  languages  Language[]
-  categories ServiceCategory[]
-  photoPath  String?
-  idVerified Boolean           @default(false)
-  active     Boolean           @default(true)
-  notes      String?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  id                 String          @id @default(uuid()) @db.Uuid
+  status             WorkerStatus    @default(DRAFT)
+  /// Deactivated workers keep their history but can't be assigned
+  active             Boolean         @default(true)
+  fullName           String
+  gender             Gender
+  dateOfBirth        DateTime?       @db.Date
+  nationality        String?
+  countryOfResidence String?
+  languages          Language[]
+  /// ServiceType keys
+  categories         String[]
+  phone              String
+  email              String?
+  province           String?
+  district           String?
+  sector             String?
+  cell               String?
+  village            String?
+  latitude           Float?
+  longitude          Float?
+  experience         String?
+  idType             IdDocumentType?
+  idNumber           String?
+  nextOfKinName      String?
+  nextOfKinRelation  String?
+  nextOfKinPhone     String?
+  nextOfKinAddress   String?
+  nextOfKinIdNumber  String?
+  /// E.164; where payouts are sent by MoMo
+  payoutMsisdn       String?
+  payoutBankName     String?
+  payoutBankAccount  String?
+  notes              String?
+  createdById        String?         @db.Uuid
+  verifiedById       String?         @db.Uuid
+  verifiedAt         DateTime?
+  declineReason      String?
+  /// Verifier's checklist, e.g. {"fullName":true,"photo":false}
+  verificationChecks Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   assignments ServiceRequest[]
   reviews     Review[]
+  documents   WorkerDocument[]
 
+  @@index([status])
   @@map("workers")
+  @@schema("app")
+}
+
+/// Worker photo and ID scans. Stored in Postgres for the MVP, like ticket attachments.
+model WorkerDocument {
+  id           String             @id @default(uuid()) @db.Uuid
+  workerId     String             @db.Uuid
+  kind         WorkerDocumentKind
+  filename     String
+  contentType  String
+  sizeBytes    Int
+  data         Bytes
+  uploadedById String?            @db.Uuid
+  createdAt    DateTime           @default(now())
+
+  worker Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, kind])
+  @@map("worker_documents")
+  @@schema("app")
+}
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+enum ServiceFeeType {
+  /// Per visit: worker fee + platform service fee
+  SERVICE
+  /// Long-term placement: one-off match fee
+  MATCH
+  /// Client chooses one-time visit or long-term placement
+  EITHER
+
+  @@schema("app")
+}
+
+/// Services clients can request; ops can add, rename or hide them.
+model ServiceType {
+  /// Stable key, e.g. CLEANING
+  key          String         @id
+  label        String
+  /// Shown to ops when pricing, e.g. "8,000 RWF / hour"
+  pricingGuide String?
+  feeType      ServiceFeeType @default(SERVICE)
+  visible      Boolean        @default(true)
+  sortOrder    Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  requests ServiceRequest[]
+
+  @@map("service_types")
+  @@schema("app")
+}
+
+/// Single row (id = 1). Changes apply to new requests and are audited.
+model PlatformSettings {
+  id                  Int      @id @default(1)
+  serviceFeeRwf       Int      @default(1000)
+  matchFeeRwf         Int      @default(5000)
+  /// Release the worker share this long after the visit ends if the client hasn't confirmed
+  releaseAfterHours   Int      @default(24)
+  /// Ordered criteria for suggested workers: AVAILABILITY, LANGUAGE, GENDER, RATING, DISTANCE
+  matchingPriority    String[] @default(["AVAILABILITY", "LANGUAGE", "GENDER", "RATING", "DISTANCE"])
+  momoEnabled         Boolean  @default(true)
+  cardEnabled         Boolean  @default(false)
+  clientWalletEnabled Boolean  @default(false)
+  vouchersEnabled     Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+
+  @@map("platform_settings")
+  @@schema("app")
+}
+
+/// Who did what in the admin console.
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Null for the system (e.g. scheduled jobs)
+  actorId    String?  @db.Uuid
+  /// e.g. worker.created, worker.verified, settings.updated, team.invited
+  action     String
+  entityType String
+  entityId   String
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+  @@map("audit_events")
+  @@schema("app")
+}
+
+model StaffInvitation {
+  id          String    @id @default(uuid()) @db.Uuid
+  /// Lower-cased
+  email       String
+  staffRole   StaffRole
+  /// SHA-256 of the emailed token
+  tokenHash   String    @unique
+  invitedById String    @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@map("staff_invitations")
   @@schema("app")
 }
 
@@ -288,6 +452,15 @@ enum ServiceRequestStatus {
   @@schema("app")
 }
 
+enum RequestKind {
+  /// One-time visit, priced as worker fee + service fee
+  VISIT
+  /// Long-term placement (house help, driver), priced as a match fee
+  PLACEMENT
+
+  @@schema("app")
+}
+
 enum GenderPreference {
   ANY
   FEMALE
@@ -301,7 +474,9 @@ model ServiceRequest {
   /// Human-readable sequence, shown as SR-<number>
   number             Int              @unique @default(autoincrement())
   clientId           String           @db.Uuid
-  category           ServiceCategory
+  /// ServiceType key
+  category           String
+  kind               RequestKind      @default(VISIT)
   description        String
   scheduledAt        DateTime
   durationHours      Decimal          @db.Decimal(4, 1)
@@ -323,7 +498,10 @@ model ServiceRequest {
   pricedAt           DateTime?
   adjustmentNote     String?
   voucherId          String?              @db.Uuid
+  /// Held while priced/paid; confirmed once ASSIGNED
   assignedWorkerId   String?              @db.Uuid
+  /// Last payment reminder sent to the client
+  remindedAt         DateTime?
   cancellationReason String?
   completedAt        DateTime?
   /// Optimistic concurrency token, bumped on every update
@@ -332,6 +510,7 @@ model ServiceRequest {
   updatedAt          DateTime             @updatedAt
 
   client         Profile               @relation(fields: [clientId], references: [id])
+  serviceType    ServiceType           @relation(fields: [category], references: [key])
   assignedWorker Worker?               @relation(fields: [assignedWorkerId], references: [id])
   voucher        Voucher?              @relation(fields: [voucherId], references: [id])
   events         ServiceRequestEvent[]
@@ -519,13 +698,18 @@ model SupportTicket {
   subject          String
   description      String
   status           TicketStatus @default(OPEN)
+  /// Staff member handling it
+  assignedToId     String?      @db.Uuid
   closedAt         DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
   client         Profile            @relation(fields: [clientId], references: [id])
+  assignedTo     Profile?           @relation("TicketAssignee", fields: [assignedToId], references: [id])
   serviceRequest ServiceRequest?    @relation(fields: [serviceRequestId], references: [id])
   attachments    TicketAttachment[]
+  notes          TicketNote[]
+  messages       TicketMessage[]
 
   @@index([clientId, createdAt])
   @@index([status])
@@ -548,5 +732,37 @@ model TicketAttachment {
 
   @@index([ticketId])
   @@map("ticket_attachments")
+  @@schema("app")
+}
+
+/// Staff-only notes on a ticket.
+model TicketNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author Profile       @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_notes")
+  @@schema("app")
+}
+
+/// Replies sent to the client (by email).
+model TicketMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author Profile       @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
   @@schema("app")
 }

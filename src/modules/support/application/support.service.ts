@@ -2,13 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../../config/env.js';
 import type { Prisma, TicketStatus } from '../../../generated/prisma/client.js';
-import { NotFoundError } from '../../../shared/domain/domain-error.js';
+import {
+  ConflictError,
+  NotFoundError,
+} from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
 import {
   formatRequestRef,
   formatTicketRef,
 } from '../../../shared/http/references.js';
+import { AuditLog } from '../../../shared/audit/audit-log.js';
 import { Mailer } from '../../auth/application/ports.js';
+import { ticketReplyEmail } from './support-emails.js';
 import {
   assertTransition,
   deriveSubject,
@@ -24,7 +29,13 @@ import type {
 
 const ticketInclude = {
   serviceRequest: {
-    select: { id: true, number: true, category: true, scheduledAt: true },
+    select: {
+      id: true,
+      number: true,
+      category: true,
+      scheduledAt: true,
+      serviceType: { select: { label: true } },
+    },
   },
   // Never load file contents for listings
   attachments: {
@@ -33,8 +44,21 @@ const ticketInclude = {
   },
 } satisfies Prisma.SupportTicketInclude;
 
+const entryInclude = {
+  orderBy: { createdAt: 'asc' },
+  select: {
+    id: true,
+    body: true,
+    createdAt: true,
+    author: { select: { id: true, fullName: true } },
+  },
+} as const;
+
 const adminInclude = {
   ...ticketInclude,
+  assignedTo: { select: { id: true, fullName: true } },
+  notes: entryInclude,
+  messages: entryInclude,
   client: {
     select: {
       id: true,
@@ -59,6 +83,7 @@ export class SupportService {
     private readonly prisma: PrismaService,
     private readonly mailer: Mailer,
     private readonly config: ConfigService<Env, true>,
+    private readonly audit: AuditLog,
   ) {}
 
   /** "Report an issue" */
@@ -143,8 +168,13 @@ export class SupportService {
   }
 
   async update(
+    actorId: string,
     id: string,
-    input: { status?: TicketStatus; subject?: string },
+    input: {
+      status?: TicketStatus;
+      subject?: string;
+      assignedToId?: string | null;
+    },
   ): Promise<AdminTicketView> {
     const current = await this.prisma.supportTicket.findUnique({
       where: { id },
@@ -153,17 +183,104 @@ export class SupportService {
     if (!current)
       throw new NotFoundError('ticket_not_found', 'Ticket not found');
     if (input.status) assertTransition(current.status, input.status);
+    if (input.assignedToId) {
+      const staff = await this.prisma.profile.count({
+        where: { id: input.assignedToId, role: 'ADMIN', staffDisabledAt: null },
+      });
+      if (!staff)
+        throw new NotFoundError(
+          'staff_not_found',
+          'That team member does not exist',
+        );
+    }
     await this.prisma.supportTicket.update({
       where: { id },
       data: {
         subject: input.subject?.trim(),
+        assignedToId: input.assignedToId,
         status: input.status,
         ...(input.status && input.status !== current.status
           ? { closedAt: input.status === 'CLOSED' ? new Date() : null }
           : {}),
       },
     });
+    await this.audit.record({
+      actorId,
+      action: 'ticket.updated',
+      entityType: 'ticket',
+      entityId: id,
+      data: { ...input },
+    });
     return this.getForAdmin(id);
+  }
+
+  /** Staff-only note */
+  async addNote(
+    actorId: string,
+    id: string,
+    body: string,
+  ): Promise<AdminTicketView> {
+    await this.requireTicket(id);
+    await this.prisma.ticketNote.create({
+      data: { ticketId: id, authorId: actorId, body: body.trim() },
+    });
+    return this.getForAdmin(id);
+  }
+
+  /** Emails the client and logs the reply; picks up an open ticket. */
+  async reply(
+    actorId: string,
+    id: string,
+    body: string,
+  ): Promise<AdminTicketView> {
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+      include: adminInclude,
+    });
+    if (!ticket)
+      throw new NotFoundError('ticket_not_found', 'Ticket not found');
+    if (ticket.status === 'CLOSED') {
+      throw new ConflictError(
+        'ticket_closed',
+        'Reopen the ticket before replying',
+      );
+    }
+    const author = await this.prisma.profile.findUniqueOrThrow({
+      where: { id: actorId },
+      select: { fullName: true },
+    });
+    // Send first: a reply that never reached the client must not be logged as sent
+    await this.mailer.send(
+      ticketReplyEmail(
+        ticket.client.user.email,
+        ticket.client.fullName,
+        formatTicketRef(ticket.number),
+        ticket.subject,
+        body.trim(),
+        author.fullName,
+      ),
+    );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ticketMessage.create({
+        data: { ticketId: id, authorId: actorId, body: body.trim() },
+      });
+      if (ticket.status === 'OPEN') {
+        await tx.supportTicket.update({
+          where: { id },
+          data: {
+            status: 'ACTIVE',
+            assignedToId: ticket.assignedToId ?? actorId,
+          },
+        });
+      }
+    });
+    return this.getForAdmin(id);
+  }
+
+  private async requireTicket(id: string): Promise<void> {
+    if (!(await this.prisma.supportTicket.count({ where: { id } }))) {
+      throw new NotFoundError('ticket_not_found', 'Ticket not found');
+    }
   }
 
   /** File contents; clients can only fetch their own tickets' files. */
@@ -232,6 +349,7 @@ function toView(row: TicketRow): TicketView {
           id: row.serviceRequest.id,
           reference: formatRequestRef(row.serviceRequest.number),
           category: row.serviceRequest.category,
+          categoryLabel: row.serviceRequest.serviceType.label,
           scheduledAt: row.serviceRequest.scheduledAt,
         }
       : null,
@@ -242,8 +360,17 @@ function toView(row: TicketRow): TicketView {
 }
 
 function toAdminView(row: AdminTicketRow): AdminTicketView {
+  const entry = (e: AdminTicketRow['notes'][number]) => ({
+    id: e.id,
+    author: e.author,
+    body: e.body,
+    at: e.createdAt,
+  });
   return {
     ...toView(row),
+    assignedTo: row.assignedTo,
+    notes: row.notes.map(entry),
+    replies: row.messages.map(entry),
     client: {
       id: row.client.id,
       fullName: row.client.fullName,

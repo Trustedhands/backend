@@ -52,7 +52,13 @@ export class PaymentQueries {
         KIGALI_OFFSET_MS,
     );
 
-    const request = { select: { number: true, category: true } } as const;
+    const request = {
+      select: {
+        number: true,
+        category: true,
+        serviceType: { select: { label: true } },
+      },
+    } as const;
     const [payments, refunds, month, wallet] = await Promise.all([
       this.prisma.payment.findMany({
         where: { clientId },
@@ -86,6 +92,7 @@ export class PaymentQueries {
         id: p.id,
         kind: 'PAYMENT' as const,
         category: p.serviceRequest.category,
+        categoryLabel: p.serviceRequest.serviceType.label,
         serviceRequestReference: formatRequestRef(p.serviceRequest.number),
         receiptReference:
           p.status === 'SUCCESSFUL' ? formatReceiptRef(p.receiptNumber) : null,
@@ -97,6 +104,7 @@ export class PaymentQueries {
         id: r.id,
         kind: 'REFUND' as const,
         category: r.payment.serviceRequest.category,
+        categoryLabel: r.payment.serviceRequest.serviceType.label,
         serviceRequestReference: formatRequestRef(
           r.payment.serviceRequest.number,
         ),

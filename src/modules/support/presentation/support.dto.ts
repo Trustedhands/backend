@@ -12,7 +12,6 @@ import {
   MinLength,
 } from 'class-validator';
 import { TicketStatus } from '../../../generated/prisma/enums.js';
-import { ServiceCategory } from '../../service-requests/domain/service-request.js';
 
 /** Multipart text fields; files go in `files` (up to 3 JPG/PNG/PDF, 5 MB each). */
 export class CreateTicketDto {
@@ -38,8 +37,9 @@ export class TicketRequestView {
   id: string;
   /** e.g. SR-2041 */
   reference: string;
-  @ApiProperty({ enum: ServiceCategory })
-  category: ServiceCategory;
+  /** Service type key */
+  category: string;
+  categoryLabel: string;
   scheduledAt: Date;
 }
 
@@ -64,8 +64,25 @@ export class TicketClientView {
   phone: string | null;
 }
 
+export class StaffRefView {
+  id: string;
+  fullName: string;
+}
+
+export class TicketEntryView {
+  id: string;
+  author: StaffRefView;
+  body: string;
+  at: Date;
+}
+
 export class AdminTicketView extends TicketView {
   client: TicketClientView;
+  assignedTo: StaffRefView | null;
+  /** Staff-only */
+  notes: TicketEntryView[];
+  /** Replies emailed to the client */
+  replies: TicketEntryView[];
 }
 
 export class AdminTicketPage {
@@ -93,7 +110,19 @@ export class AdminListTicketsQuery {
   pageSize: number = 25;
 }
 
+export class TicketTextDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(4000)
+  body: string;
+}
+
 export class UpdateTicketDto {
+  /** Staff member handling it; null to unassign */
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string | null;
+
   @ApiProperty({ enum: TicketStatus, required: false })
   @IsOptional()
   @IsEnum(TicketStatus)

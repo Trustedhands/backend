@@ -9,7 +9,10 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
-import { CurrentUser, Roles } from '../../../shared/auth/decorators.js';
+import {
+  CurrentUser,
+  RequirePermission,
+} from '../../../shared/auth/decorators.js';
 import { ReviewsService } from '../application/reviews.service.js';
 import {
   AdminListReviewsQuery,
@@ -37,7 +40,7 @@ export class ReviewsController {
 
 @ApiTags('admin: reviews')
 @ApiBearerAuth()
-@Roles('ADMIN')
+@RequirePermission('reviews.view')
 @Controller('admin/reviews')
 export class AdminReviewsController {
   constructor(private readonly reviews: ReviewsService) {}

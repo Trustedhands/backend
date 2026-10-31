@@ -17,17 +17,14 @@ export const ServiceRequestStatus = {
 export type ServiceRequestStatus =
   (typeof ServiceRequestStatus)[keyof typeof ServiceRequestStatus];
 
-export const ServiceCategory = {
-  CLEANING: 'CLEANING',
-  COOKING: 'COOKING',
-  ERRANDS: 'ERRANDS',
-  REPAIRS: 'REPAIRS',
-  LAUNDRY: 'LAUNDRY',
-  DRIVER: 'DRIVER',
-  OTHER: 'OTHER',
-} as const;
-export type ServiceCategory =
-  (typeof ServiceCategory)[keyof typeof ServiceCategory];
+/** A ServiceType key, e.g. CLEANING. Services are configured by ops. */
+export type ServiceCategory = string;
+
+/** VISIT: worker fee + service fee. PLACEMENT: long-term match, one-off match fee. */
+export type RequestKind = 'VISIT' | 'PLACEMENT';
+
+/** Minimum gap between payment reminders */
+const REMINDER_COOLDOWN_MS = 60 * 60 * 1000;
 
 export const GenderPreference = {
   ANY: 'ANY',
@@ -87,6 +84,7 @@ export interface ServiceRequestProps {
   number: number | null;
   clientId: string;
   category: ServiceCategory;
+  kind: RequestKind;
   description: string;
   scheduledAt: Date;
   durationHours: number;
@@ -97,7 +95,9 @@ export interface ServiceRequestProps {
   quote: Quote | null;
   discountRwf: number;
   adjustmentNote: string | null;
+  /** Held while PRICED/PAID; confirmed from ASSIGNED on */
   assignedWorkerId: string | null;
+  remindedAt: Date | null;
   cancellationReason: string | null;
   completedAt: Date | null;
   version: number;
@@ -107,6 +107,7 @@ export interface ServiceRequestProps {
 export interface SubmitServiceRequest {
   clientId: string;
   category: ServiceCategory;
+  kind: RequestKind;
   description: string;
   scheduledAt: Date;
   durationHours: number;
@@ -169,6 +170,7 @@ export class ServiceRequest {
       number: null,
       clientId: input.clientId,
       category: input.category,
+      kind: input.kind,
       description,
       scheduledAt: input.scheduledAt,
       durationHours: input.durationHours,
@@ -180,6 +182,7 @@ export class ServiceRequest {
       discountRwf: 0,
       adjustmentNote: null,
       assignedWorkerId: null,
+      remindedAt: null,
       cancellationReason: null,
       completedAt: null,
       version: 0,
@@ -211,6 +214,12 @@ export class ServiceRequest {
   get assignedWorkerId() {
     return this.props.assignedWorkerId;
   }
+  get category() {
+    return this.props.category;
+  }
+  get kind() {
+    return this.props.kind;
+  }
   get version() {
     return this.props.version;
   }
@@ -226,17 +235,28 @@ export class ServiceRequest {
     return this.props.clientId === clientId;
   }
 
-  /** Ops sends (or revises) the price. */
+  /**
+   * Ops sends (or revises) the price, holding a worker for the job. The hold
+   * becomes a confirmed assignment once the client pays.
+   */
   price(
     input: {
       workerFeeRwf: number;
       serviceFeeRwf: number;
+      /** Held worker */
+      workerId: string;
       note?: string | null;
     },
     actorId: string,
     now = new Date(),
   ): void {
     this.assertStatus(['REQUESTED', 'ADJUSTMENT_REQUESTED', 'PRICED'], 'price');
+    if (!input.workerId) {
+      throw new InvalidInputError(
+        'worker_required',
+        'Assign a worker to send the price',
+      );
+    }
     for (const [name, value] of Object.entries({
       workerFeeRwf: input.workerFeeRwf,
       serviceFeeRwf: input.serviceFeeRwf,
@@ -261,7 +281,9 @@ export class ServiceRequest {
       note: input.note?.trim() || null,
       pricedAt: now,
     };
+    this.props.assignedWorkerId = input.workerId;
     this.props.adjustmentNote = null;
+    this.props.remindedAt = null;
     this.props.status = 'PRICED';
     this.record('PRICED', actorId, this.props.quote.note, now);
   }
@@ -294,10 +316,28 @@ export class ServiceRequest {
     this.record('PAID', null, null, now);
   }
 
-  /** Ops assigns a worker after payment; can reassign until work starts. */
-  assignWorker(workerId: string, actorId: string, now = new Date()): void {
-    this.assertStatus(['PAID', 'ASSIGNED'], 'assign a worker');
-    if (this.props.assignedWorkerId === workerId) return;
+  /**
+   * After payment, ops confirms the held worker (or swaps in another);
+   * can reassign until work starts.
+   */
+  assignWorker(
+    workerId: string | null,
+    actorId: string,
+    now = new Date(),
+  ): void {
+    this.assertStatus(['PAID', 'ASSIGNED'], 'confirm a worker');
+    workerId ??= this.props.assignedWorkerId;
+    if (!workerId) {
+      throw new InvalidInputError(
+        'worker_required',
+        'Choose a worker to confirm',
+      );
+    }
+    if (
+      this.props.status === 'ASSIGNED' &&
+      this.props.assignedWorkerId === workerId
+    )
+      return;
     const reassigning = this.props.status === 'ASSIGNED';
     this.props.assignedWorkerId = workerId;
     this.props.status = 'ASSIGNED';
@@ -307,6 +347,19 @@ export class ServiceRequest {
       reassigning ? 'Worker reassigned' : null,
       now,
     );
+  }
+
+  /** Ops nudges a client who hasn't paid a sent price. */
+  remind(now = new Date()): void {
+    this.assertStatus(['PRICED'], 'remind about');
+    const last = this.props.remindedAt;
+    if (last && now.getTime() - last.getTime() < REMINDER_COOLDOWN_MS) {
+      throw new ConflictError(
+        'reminder_cooldown',
+        'A reminder was sent less than an hour ago',
+      );
+    }
+    this.props.remindedAt = now;
   }
 
   start(actorId: string, now = new Date()): void {

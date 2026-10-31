@@ -46,6 +46,6 @@ import { AuthController } from './presentation/auth.controller.js';
           : new LogSmsSender(),
     },
   ],
-  exports: [Mailer],
+  exports: [Mailer, SmsSender, PasswordHasher, Sessions],
 })
 export class AuthAccountsModule {}

@@ -39,11 +39,24 @@ All app tables live in the **`app` schema**, not `public`. Supabase's Data API (
 
 ### Making someone an admin
 
-Admins are ordinary accounts whose profile has `role = ADMIN`. After they've registered:
+Staff are accounts with `role = ADMIN` and a **staff role** that decides what they can do (`src/shared/auth/permissions.ts`):
+
+| Staff role        | Can                                                              |
+| ----------------- | ---------------------------------------------------------------- |
+| Super admin       | Everything, including settings and the team                      |
+| Verification lead | Create and verify workers                                        |
+| Finance           | Payments, refunds and payouts; view tickets                      |
+| Customer service  | Tickets: assign, internal notes, email replies                   |
+
+Every staff member can view the dashboard, requests, workers, clients and reviews. Admin endpoints declare what they need with `@RequirePermission()`. Roles are read from the database on each request, so changes take effect immediately.
+
+To bootstrap the first super admin, register an account, then run:
 
 ```bash
 pnpm admin:promote ops@example.com
 ```
+
+Invite everyone else from Settings & team. Invitations are emailed links to `ADMIN_APP_URL/accept-invite` that work once and expire after 7 days.
 
 ## Authentication
 
@@ -91,9 +104,12 @@ Bounded contexts:
 
 - **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
 - **identity**: client profile and home address.
-- **workers**: admin-managed worker records, plus rating and job stats.
+- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and **two-admin verification**. Whoever added a worker can't verify them, and every ID check must be ticked. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
+- **configuration**: platform settings (fees, release rule, matching priority, payment-method toggles) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
+- **team**: staff roles, invitations, and removing access.
+- **operations**: dashboard figures, global search and the clients list.
 - **reviews**: clients rate the worker on a completed job, once per job. Ratings of 2 or below are emailed to `SUPPORT_INBOX`.
 - **support**: "Report an issue" tickets (`OPEN → ACTIVE → CLOSED`, reopenable), each optionally linked to a booking. New tickets are emailed to `SUPPORT_INBOX`.
 
@@ -111,6 +127,10 @@ Cancel: client before payment; ops until work starts (refund separately).
 ```
 
 Every transition is recorded in `service_request_events`, which drives the progress timeline in the app.
+
+When ops prices a request they also **hold** a worker. The worker must be verified, active and offer that service. Clients don't see the worker until it's **confirmed** after payment ("Confirm worker" moves the request to `ASSIGNED`). The platform fee comes from Settings, and placements are charged the match fee instead. "Suggested workers" ranks candidates by the matching priority in Settings: availability (clashing bookings, with a 30-minute buffer), language, gender, rating, and distance from the worker's GPS point to the address.
+
+Admin actions such as verifications, settings changes and team changes are written to `audit_events`.
 
 ### Payments
 

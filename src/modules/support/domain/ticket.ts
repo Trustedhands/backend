@@ -2,11 +2,16 @@ import {
   ConflictError,
   InvalidInputError,
 } from '../../../shared/domain/domain-error.js';
+import {
+  detectFileType,
+  MAX_UPLOAD_BYTES,
+  safeFilename,
+} from '../../../shared/files/file-type.js';
 
 export type TicketStatus = 'OPEN' | 'ACTIVE' | 'CLOSED';
 
 export const MAX_ATTACHMENTS = 3;
-export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = MAX_UPLOAD_BYTES;
 const MAX_DESCRIPTION = 4000;
 const SUBJECT_LENGTH = 60;
 
@@ -35,31 +40,7 @@ export function validateDescription(description: string): string {
   return trimmed;
 }
 
-const ALLOWED: ReadonlyArray<{
-  type: string;
-  matches: (b: Buffer) => boolean;
-}> = [
-  {
-    type: 'image/jpeg',
-    matches: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  },
-  {
-    type: 'image/png',
-    matches: (b) =>
-      b
-        .subarray(0, 8)
-        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-  },
-  {
-    type: 'application/pdf',
-    matches: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
-  },
-];
-
-/** Identifies an upload by its bytes, ignoring the client's claimed type and name. */
-export function detectFileType(bytes: Buffer): string | null {
-  return ALLOWED.find((a) => a.matches(bytes))?.type ?? null;
-}
+export { detectFileType } from '../../../shared/files/file-type.js';
 
 export interface UploadedFile {
   originalname: string;
@@ -100,21 +81,6 @@ export function validateAttachments(files: UploadedFile[]): ValidAttachment[] {
       data: f.buffer,
     };
   });
-}
-
-/** Keeps a readable name but nothing that could break a Content-Disposition header. */
-function safeFilename(name: string, contentType: string): string {
-  const ext = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'application/pdf': '.pdf',
-  }[contentType]!;
-  const base = name
-    .replace(/\.[^.]*$/, '')
-    .replace(/[^\w\- ]+/g, '')
-    .trim()
-    .slice(0, 80);
-  return `${base || 'attachment'}${ext}`;
 }
 
 /** Ops moves tickets OPEN → ACTIVE → CLOSED, and may reopen a closed one. */

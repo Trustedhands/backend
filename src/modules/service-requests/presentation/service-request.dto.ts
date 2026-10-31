@@ -21,14 +21,20 @@ import { AddressDto } from '../../../shared/http/address.dto.js';
 import {
   GenderPreference,
   Language,
-  ServiceCategory,
   ServiceRequestStatus,
 } from '../domain/service-request.js';
 
 export class CreateServiceRequestDto {
-  @ApiProperty({ enum: ServiceCategory })
-  @IsEnum(ServiceCategory)
-  category: ServiceCategory;
+  /** Service type key from GET /v1/service-types */
+  @IsString()
+  @MaxLength(40)
+  category: string;
+
+  /** For services offered both ways (feeType EITHER); otherwise implied by the service */
+  @ApiProperty({ enum: ['VISIT', 'PLACEMENT'], required: false })
+  @IsOptional()
+  @IsIn(['VISIT', 'PLACEMENT'])
+  kind?: 'VISIT' | 'PLACEMENT';
 
   @IsString()
   @MinLength(1)
@@ -82,15 +88,15 @@ export class CancelDto {
 }
 
 export class PriceDto {
+  /** Worker's share; ignored for placements (match fee only) */
   @IsInt()
   @Min(0)
   @Max(10_000_000)
   workerFeeRwf: number;
 
-  @IsInt()
-  @Min(0)
-  @Max(10_000_000)
-  serviceFeeRwf: number;
+  /** The worker to hold for this job */
+  @IsUUID()
+  workerId: string;
 
   /** Shown to the client, e.g. "Groceries paid separately on receipt" */
   @IsOptional()
@@ -100,8 +106,32 @@ export class PriceDto {
 }
 
 export class AssignWorkerDto {
+  /** Defaults to the held worker */
+  @IsOptional()
   @IsUUID()
-  workerId: string;
+  workerId?: string;
+}
+
+export class PipelineQuery {
+  /** Service type key */
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  /** Only requests scheduled within this many days (past and future) of today */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  days?: number;
+}
+
+export class SuggestedWorkersQuery {
+  @ApiProperty({ enum: ['best', 'rating', 'distance'], required: false })
+  @IsOptional()
+  @IsIn(['best', 'rating', 'distance'])
+  sort: 'best' | 'rating' | 'distance' = 'best';
 }
 
 export class AdminListServiceRequestsQuery {

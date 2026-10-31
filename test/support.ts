@@ -150,6 +150,51 @@ export const bearer = (user: { token: string }) => ({
   Authorization: `Bearer ${user.token}`,
 });
 
+/** Turns a registered user into staff with the given role. */
+export async function makeStaff(
+  t: TestApp,
+  user: TestUser,
+  staffRole:
+    | 'SUPER_ADMIN'
+    | 'VERIFICATION_LEAD'
+    | 'FINANCE'
+    | 'CUSTOMER_SERVICE' = 'SUPER_ADMIN',
+): Promise<TestUser> {
+  await t.prisma.profile.update({
+    where: { id: user.id },
+    data: { role: 'ADMIN', staffRole },
+  });
+  return user;
+}
+
+/** A ready-to-assign worker, inserted directly (the verification flow has its own tests). */
+export async function createVerifiedWorker(
+  t: TestApp,
+  overrides: Partial<{
+    fullName: string;
+    gender: 'FEMALE' | 'MALE';
+    languages: Array<'EN' | 'FR' | 'RW' | 'SW'>;
+    categories: string[];
+    latitude: number;
+    longitude: number;
+  }> = {},
+): Promise<string> {
+  const worker = await t.prisma.worker.create({
+    data: {
+      status: 'VERIFIED',
+      fullName: overrides.fullName ?? 'Jeanne Mukamana',
+      gender: overrides.gender ?? 'FEMALE',
+      languages: overrides.languages ?? ['EN', 'FR'],
+      categories: overrides.categories ?? ['CLEANING'],
+      phone: '+250788000111',
+      latitude: overrides.latitude,
+      longitude: overrides.longitude,
+      verifiedAt: new Date(),
+    },
+  });
+  return worker.id;
+}
+
 /** Removes everything the given users created. */
 export async function deleteUsers(
   prisma: PrismaService,
@@ -157,13 +202,39 @@ export async function deleteUsers(
   workerIds: string[] = [],
 ) {
   const requests = { clientId: { in: userIds } };
+  await prisma.supportTicket.deleteMany({
+    where: {
+      OR: [{ clientId: { in: userIds } }, { assignedToId: { in: userIds } }],
+    },
+  });
+  await prisma.review.deleteMany({
+    where: {
+      OR: [{ clientId: { in: userIds } }, { workerId: { in: workerIds } }],
+    },
+  });
   await prisma.serviceRequestEvent.deleteMany({
     where: { serviceRequest: requests },
   });
   await prisma.payment.deleteMany({ where: { clientId: { in: userIds } } });
   await prisma.serviceRequest.deleteMany({ where: requests });
-  if (workerIds.length)
+  if (workerIds.length) {
+    await prisma.serviceRequest.updateMany({
+      where: { assignedWorkerId: { in: workerIds } },
+      data: { assignedWorkerId: null },
+    });
     await prisma.worker.deleteMany({ where: { id: { in: workerIds } } });
+  }
+  await prisma.staffInvitation.deleteMany({
+    where: { invitedById: { in: userIds } },
+  });
+  await prisma.auditEvent.deleteMany({
+    where: {
+      OR: [
+        { actorId: { in: userIds } },
+        { entityId: { in: [...userIds, ...workerIds] } },
+      ],
+    },
+  });
   // Cascades to profiles, addresses, saved methods, tokens and codes
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 }

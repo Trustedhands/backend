@@ -16,7 +16,10 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
-import { CurrentUser, Roles } from '../../../shared/auth/decorators.js';
+import {
+  CurrentUser,
+  RequirePermission,
+} from '../../../shared/auth/decorators.js';
 import { SupportService } from '../application/support.service.js';
 import {
   MAX_ATTACHMENT_BYTES,
@@ -29,6 +32,7 @@ import {
   AdminTicketView,
   CreateTicketDto,
   TicketView,
+  TicketTextDto,
   UpdateTicketDto,
 } from './support.dto.js';
 
@@ -112,11 +116,11 @@ export class SupportController {
 
 @ApiTags('admin: support')
 @ApiBearerAuth()
-@Roles('ADMIN')
 @Controller('admin/support/tickets')
 export class AdminSupportController {
   constructor(private readonly support: SupportService) {}
 
+  @RequirePermission('tickets.view')
   @Get()
   list(@Query() query: AdminListTicketsQuery): Promise<AdminTicketPage> {
     return this.support.listForAdmin({
@@ -126,20 +130,46 @@ export class AdminSupportController {
     });
   }
 
+  @RequirePermission('tickets.view')
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string): Promise<AdminTicketView> {
     return this.support.getForAdmin(id);
   }
 
-  /** Change status (OPEN → ACTIVE → CLOSED, or reopen) or rename */
+  /** Change status (OPEN → ACTIVE → CLOSED, or reopen), assignee or title */
+  @RequirePermission('tickets.manage')
   @Patch(':id')
   update(
+    @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTicketDto,
   ): Promise<AdminTicketView> {
-    return this.support.update(id, dto);
+    return this.support.update(user.id, id, dto);
   }
 
+  /** Internal note, visible to staff only */
+  @RequirePermission('tickets.manage')
+  @Post(':id/notes')
+  addNote(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TicketTextDto,
+  ): Promise<AdminTicketView> {
+    return this.support.addNote(user.id, id, dto.body);
+  }
+
+  /** "Send reply": emails the client */
+  @RequirePermission('tickets.manage')
+  @Post(':id/replies')
+  reply(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TicketTextDto,
+  ): Promise<AdminTicketView> {
+    return this.support.reply(user.id, id, dto.body);
+  }
+
+  @RequirePermission('tickets.view')
   @Get(':id/attachments/:attachmentId')
   @Header('X-Content-Type-Options', 'nosniff')
   @Header(

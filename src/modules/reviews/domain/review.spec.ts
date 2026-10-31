@@ -8,6 +8,7 @@ function completedRequest() {
     {
       clientId: 'client-1',
       category: 'CLEANING',
+      kind: 'VISIT',
       description: 'Full clean',
       scheduledAt: new Date('2026-11-01T07:00:00Z'),
       durationHours: 4,
@@ -23,9 +24,13 @@ function completedRequest() {
     },
     NOW,
   );
-  r.price({ workerFeeRwf: 20_000, serviceFeeRwf: 1_000 }, 'admin', NOW);
+  r.price(
+    { workerFeeRwf: 20_000, serviceFeeRwf: 1_000, workerId: 'worker-1' },
+    'admin',
+    NOW,
+  );
   r.markPaid(21_000, NOW);
-  r.assignWorker('worker-1', 'admin', NOW);
+  r.assignWorker(null, 'admin', NOW);
   return r;
 }
 

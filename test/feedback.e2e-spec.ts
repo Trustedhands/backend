@@ -1,7 +1,9 @@
 import {
   bearer,
   createTestApp,
+  createVerifiedWorker,
   deleteUsers,
+  makeStaff,
   registerUser,
   type TestApp,
   type TestUser,
@@ -27,11 +29,10 @@ describe('Reviews and support (e2e)', () => {
     t = await createTestApp();
     client = await registerUser(t, { fullName: 'Claire Dubois' });
     other = await registerUser(t, { fullName: 'Someone Else' });
-    admin = await registerUser(t, { fullName: 'Ops Admin' });
-    await t.prisma.profile.update({
-      where: { id: admin.id },
-      data: { role: 'ADMIN' },
-    });
+    admin = await makeStaff(
+      t,
+      await registerUser(t, { fullName: 'Ops Admin' }),
+    );
   });
 
   afterAll(async () => {
@@ -62,10 +63,13 @@ describe('Reviews and support (e2e)', () => {
       })
       .expect(201);
     const id: string = created.body.id;
+    // Each booking gets its own worker so ratings don't mix between tests
+    const workerId = await createVerifiedWorker(t, { languages: ['FR'] });
+    workerIds.push(workerId);
     await http()
       .post(`/v1/admin/service-requests/${id}/price`)
       .set(bearer(admin))
-      .send({ workerFeeRwf: 20000, serviceFeeRwf: 1000 })
+      .send({ workerFeeRwf: 20000, workerId })
       .expect(200);
     if (until === 'priced') return id;
 
@@ -86,22 +90,10 @@ describe('Reviews and support (e2e)', () => {
       .set(bearer(client))
       .expect(200);
 
-    const worker = await http()
-      .post('/v1/admin/workers')
-      .set(bearer(admin))
-      .send({
-        fullName: 'Jeanne Mukamana',
-        phone: '+250788000111',
-        gender: 'FEMALE',
-        languages: ['FR'],
-        categories: ['CLEANING'],
-      })
-      .expect(201);
-    workerIds.push(worker.body.id);
     await http()
       .post(`/v1/admin/service-requests/${id}/assign`)
       .set(bearer(admin))
-      .send({ workerId: worker.body.id })
+      .send({})
       .expect(200);
     await http()
       .post(`/v1/service-requests/${id}/complete`)

@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MaxLength, MinLength } from 'class-validator';
-import { ServiceCategory } from '../../service-requests/domain/service-request.js';
 
 export class InitiatePaymentDto {
   /** MTN Mobile Money number, e.g. 078 123 4567 */
@@ -29,14 +28,16 @@ export class TransactionView {
   id: string;
   @ApiProperty({ enum: ['PAYMENT', 'REFUND'] })
   kind: 'PAYMENT' | 'REFUND';
-  @ApiProperty({ enum: ServiceCategory })
-  category: ServiceCategory;
+  /** Service type key */
+  category: string;
+  categoryLabel: string;
   serviceRequestReference: string;
   receiptReference: string | null;
   /** Always positive; `kind` gives the direction */
   amountRwf: number;
-  @ApiProperty({ enum: ['PENDING', 'SUCCESSFUL', 'FAILED', 'CREDITED'] })
-  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'CREDITED';
+  /** Refunds go back to the payer's MoMo number: PENDING, then REFUNDED */
+  @ApiProperty({ enum: ['PENDING', 'SUCCESSFUL', 'FAILED', 'REFUNDED'] })
+  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'REFUNDED';
   at: Date;
 }
 

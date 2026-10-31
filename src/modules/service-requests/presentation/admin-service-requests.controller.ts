@@ -10,30 +10,39 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
-import { CurrentUser, Roles } from '../../../shared/auth/decorators.js';
+import {
+  CurrentUser,
+  RequirePermission,
+} from '../../../shared/auth/decorators.js';
+import { MatchingService } from '../application/matching.service.js';
 import { ServiceRequestsService } from '../application/service-requests.service.js';
 import { ServiceRequestQueries } from '../infrastructure/service-request.queries.js';
 import {
   AdminListServiceRequestsQuery,
   AssignWorkerDto,
   CancelDto,
+  PipelineQuery,
   PriceDto,
+  SuggestedWorkersQuery,
 } from './service-request.dto.js';
 import {
   AdminServiceRequestDetailView,
   AdminServiceRequestPage,
+  PipelineView,
+  SuggestedWorkerView,
 } from './service-request.views.js';
 
 @ApiTags('admin: service requests')
 @ApiBearerAuth()
-@Roles('ADMIN')
 @Controller('admin/service-requests')
 export class AdminServiceRequestsController {
   constructor(
     private readonly service: ServiceRequestsService,
     private readonly queries: ServiceRequestQueries,
+    private readonly matching: MatchingService,
   ) {}
 
+  @RequirePermission('requests.view')
   @Get()
   async list(
     @Query() query: AdminListServiceRequestsQuery,
@@ -46,6 +55,14 @@ export class AdminServiceRequestsController {
     return { items, total, page: query.page, pageSize: query.pageSize };
   }
 
+  /** Columns for the request pipeline */
+  @RequirePermission('requests.view')
+  @Get('pipeline')
+  pipeline(@Query() query: PipelineQuery): Promise<PipelineView> {
+    return this.queries.pipeline(query);
+  }
+
+  @RequirePermission('requests.view')
   @Get(':id')
   get(
     @Param('id', ParseUUIDPipe) id: string,
@@ -53,7 +70,18 @@ export class AdminServiceRequestsController {
     return this.queries.getForAdmin(id);
   }
 
-  /** Send or revise the price */
+  /** "Suggested workers", sorted by the matching priority in Settings */
+  @RequirePermission('requests.view')
+  @Get(':id/suggested-workers')
+  suggestions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: SuggestedWorkersQuery,
+  ): Promise<SuggestedWorkerView[]> {
+    return this.matching.suggest(id, query.sort);
+  }
+
+  /** Send or revise the price, holding a worker */
+  @RequirePermission('requests.manage')
   @Post(':id/price')
   @HttpCode(200)
   async price(
@@ -65,6 +93,7 @@ export class AdminServiceRequestsController {
     return this.queries.getForAdmin(id);
   }
 
+  @RequirePermission('requests.manage')
   @Post(':id/assign')
   @HttpCode(200)
   async assign(
@@ -76,6 +105,19 @@ export class AdminServiceRequestsController {
     return this.queries.getForAdmin(id);
   }
 
+  /** Email and text the client that their price is waiting (at most hourly) */
+  @RequirePermission('requests.manage')
+  @Post(':id/remind')
+  @HttpCode(200)
+  async remind(
+    @CurrentUser() admin: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminServiceRequestDetailView> {
+    await this.service.remind(admin.id, id);
+    return this.queries.getForAdmin(id);
+  }
+
+  @RequirePermission('requests.manage')
   @Post(':id/start')
   @HttpCode(200)
   async start(
@@ -86,6 +128,7 @@ export class AdminServiceRequestsController {
     return this.queries.getForAdmin(id);
   }
 
+  @RequirePermission('requests.manage')
   @Post(':id/complete')
   @HttpCode(200)
   async complete(
@@ -96,6 +139,7 @@ export class AdminServiceRequestsController {
     return this.queries.getForAdmin(id);
   }
 
+  @RequirePermission('requests.manage')
   @Post(':id/cancel')
   @HttpCode(200)
   async cancel(

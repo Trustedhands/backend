@@ -1,7 +1,5 @@
-/** The caller, as established from a verified Supabase access token. */
+/** The caller, as established from a verified access token. */
 export interface AuthUser {
-  /** Supabase auth.users.id; also the Profile id */
+  /** User.id; also the Profile id */
   id: string;
-  email: string | null;
-  phone: string | null;
 }

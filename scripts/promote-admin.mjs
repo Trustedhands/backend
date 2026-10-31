@@ -1,29 +1,28 @@
-// Grants the admin role to an existing Supabase Auth user.
-// Usage: pnpm admin:promote someone@example.com ["Full Name"]
+// Makes an existing account a super admin (e.g. the first admin; invite the rest from the console).
+// Usage: pnpm admin:promote someone@example.com
 import 'dotenv/config';
 import pg from 'pg';
 
-const [email, fullName] = process.argv.slice(2);
+const [email] = process.argv.slice(2);
 if (!email) {
-  console.error('Usage: pnpm admin:promote <email> ["Full Name"]');
+  console.error('Usage: pnpm admin:promote <email>');
   process.exit(1);
 }
 
 const client = new pg.Client({ connectionString: process.env.DIRECT_URL });
 await client.connect();
 try {
-  const { rows } = await client.query('select id from auth.users where lower(email) = lower($1)', [email]);
-  if (!rows.length) {
-    console.error(`No Supabase Auth user with email ${email}. Sign up first, then rerun.`);
+  const { rowCount } = await client.query(
+    `update app.profiles p set role = 'ADMIN', "staffRole" = 'SUPER_ADMIN', "staffDisabledAt" = null, "updatedAt" = now()
+       from app.users u
+      where u.id = p.id and u.email = lower(trim($1))`,
+    [email],
+  );
+  if (rowCount === 0) {
+    console.error(`No account with email ${email}. Register first, then rerun.`);
     process.exitCode = 1;
   } else {
-    await client.query(
-      `insert into app.profiles (id, role, "fullName", "updatedAt")
-       values ($1, 'ADMIN', $2, now())
-       on conflict (id) do update set role = 'ADMIN', "updatedAt" = now()`,
-      [rows[0].id, fullName ?? email],
-    );
-    console.log(`${email} is now an admin.`);
+    console.log(`${email} is now a super admin.`);
   }
 } finally {
   await client.end();

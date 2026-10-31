@@ -4,9 +4,12 @@ import type { Env } from '../../../config/env.js';
 import {
   ConflictError,
   NotFoundError,
+  UnavailableError,
 } from '../../../shared/domain/domain-error.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
+import { postLedger } from '../../../shared/ledger/ledger.js';
 import { formatRequestRef } from '../../../shared/http/references.js';
+import { ConfigurationService } from '../../configuration/application/configuration.service.js';
 import { ServiceRequestRepository } from '../../service-requests/domain/service-request.repository.js';
 import { normalizeMsisdn } from '../domain/msisdn.js';
 import { Payment } from '../domain/payment.js';
@@ -35,6 +38,7 @@ export class PaymentsService {
     private readonly requests: ServiceRequestRepository,
     private readonly gateway: MobileMoneyGateway,
     private readonly config: ConfigService<Env, true>,
+    private readonly settings: ConfigurationService,
   ) {}
 
   /** "Accept & pay": charges the request's current price via MoMo. */
@@ -46,6 +50,13 @@ export class PaymentsService {
     const strict =
       this.config.get('MOMO_TARGET_ENVIRONMENT', { infer: true }) !== 'sandbox';
     const msisdn = normalizeMsisdn(rawMsisdn, strict);
+    // Ops can pause payments from Settings (e.g. during a MoMo outage)
+    if (!(await this.settings.settings()).momoEnabled) {
+      throw new UnavailableError(
+        'payments_paused',
+        'Mobile Money payments are paused right now. Please try again later.',
+      );
+    }
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       // Serialise payment attempts (and price changes) for this request
@@ -133,6 +144,12 @@ export class PaymentsService {
     if (payment) await this.sync(payment);
   }
 
+  /** Used by the settlement job for payments nobody is polling. */
+  async syncById(paymentId: string): Promise<void> {
+    const payment = await this.payments.findById(paymentId);
+    if (payment) await this.sync(payment);
+  }
+
   /** Brings a PENDING payment up to date with MoMo. */
   async sync(payment: Payment): Promise<Payment> {
     if (payment.status !== 'PENDING') return payment;
@@ -175,6 +192,16 @@ export class PaymentsService {
       payment.succeed(transactionId);
       // Someone else (callback vs. poll) already settled it
       if (!(await this.payments.settle(payment, tx))) return;
+      // The money now sits in escrow until the job is released
+      await postLedger(tx, [
+        {
+          account: 'ESCROW',
+          kind: 'PAYMENT_RECEIVED',
+          amountRwf: payment.amountRwf,
+          paymentId: payment.id,
+          serviceRequestId: payment.serviceRequestId,
+        },
+      ]);
 
       const request = await this.requests.findById(
         payment.serviceRequestId,

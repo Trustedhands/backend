@@ -22,7 +22,7 @@ import {
 } from '../../../generated/prisma/enums.js';
 import { AddressView } from '../../../shared/http/address.dto.js';
 
-/** Sign-up step 1, after the Supabase account exists. */
+/** Fields set at registration, editable later. */
 export class CreateProfileDto {
   @ApiProperty({ enum: AccountType })
   @IsEnum(AccountType)
@@ -108,14 +108,23 @@ export class ProfileView {
   pushEnabled: boolean;
 }
 
+export class PaymentMethodView {
+  id: string;
+  /** Full number, e.g. 250781234567; only ever returned to its owner */
+  msisdn: string;
+  /** e.g. 078 *** 4567 */
+  msisdnMasked: string;
+  isDefault: boolean;
+}
+
 export class MeView {
   id: string;
   email: string | null;
   phone: string | null;
   emailVerified: boolean;
   phoneVerified: boolean;
-  /** False until the client has created their profile (sign-up step 1). */
-  onboarded: boolean;
-  profile: ProfileView | null;
+  profile: ProfileView;
   homeAddress: AddressView | null;
+  /** Saved MoMo numbers, default first. Added after a first successful payment. */
+  paymentMethods: PaymentMethodView[];
 }

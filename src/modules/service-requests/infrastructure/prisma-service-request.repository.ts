@@ -33,9 +33,13 @@ export class PrismaServiceRequestRepository extends ServiceRequestRepository {
         id: s.id,
         clientId: s.clientId,
         category: s.category,
+        kind: s.kind,
         description: s.description,
         scheduledAt: s.scheduledAt,
         durationHours: s.durationHours,
+        placementArrangement: s.placement?.arrangement ?? null,
+        placementDaysPerWeek: s.placement?.daysPerWeek ?? null,
+        placementSalaryRwf: s.placement?.salaryRwf ?? null,
         preferredGender: s.preferredGender,
         preferredLanguages: s.preferredLanguages,
         addressDistrict: s.address.district,
@@ -74,6 +78,7 @@ export class PrismaServiceRequestRepository extends ServiceRequestRepository {
           discountRwf: s.discountRwf,
           adjustmentNote: s.adjustmentNote,
           assignedWorkerId: s.assignedWorkerId,
+          remindedAt: s.remindedAt,
           cancellationReason: s.cancellationReason,
           completedAt: s.completedAt,
           version: { increment: 1 },
@@ -120,9 +125,20 @@ function toDomain(row: ServiceRequestRow): ServiceRequest {
     number: row.number,
     clientId: row.clientId,
     category: row.category,
+    kind: row.kind,
     description: row.description,
     scheduledAt: row.scheduledAt,
-    durationHours: row.durationHours.toNumber(),
+    durationHours: row.durationHours?.toNumber() ?? null,
+    placement:
+      row.kind === 'PLACEMENT' &&
+      row.placementArrangement &&
+      row.placementDaysPerWeek
+        ? {
+            arrangement: row.placementArrangement,
+            daysPerWeek: row.placementDaysPerWeek,
+            salaryRwf: row.placementSalaryRwf,
+          }
+        : null,
     preferredGender: row.preferredGender,
     preferredLanguages: row.preferredLanguages,
     address: {
@@ -145,6 +161,7 @@ function toDomain(row: ServiceRequestRow): ServiceRequest {
     discountRwf: row.discountRwf,
     adjustmentNote: row.adjustmentNote,
     assignedWorkerId: row.assignedWorkerId,
+    remindedAt: row.remindedAt,
     cancellationReason: row.cancellationReason,
     completedAt: row.completedAt,
     version: row.version,

@@ -16,6 +16,7 @@ const submission = (
 ): SubmitServiceRequest => ({
   clientId: CLIENT,
   category: 'CLEANING',
+  kind: 'VISIT',
   description: '3-bedroom house, full clean',
   scheduledAt: new Date('2026-11-01T07:00:00Z'),
   durationHours: 4,
@@ -33,7 +34,11 @@ const submission = (
 
 const priced = () => {
   const request = ServiceRequest.submit(submission(), NOW);
-  request.price({ workerFeeRwf: 20_000, serviceFeeRwf: 1_000 }, ADMIN, NOW);
+  request.price(
+    { workerFeeRwf: 20_000, serviceFeeRwf: 1_000, workerId: 'worker-1' },
+    ADMIN,
+    NOW,
+  );
   return request;
 };
 
@@ -90,7 +95,11 @@ describe('ServiceRequest', () => {
     request.requestAdjustment('Only 3 hours needed', CLIENT, NOW);
     expect(request.status).toBe('ADJUSTMENT_REQUESTED');
 
-    request.price({ workerFeeRwf: 15_000, serviceFeeRwf: 1_000 }, ADMIN, NOW);
+    request.price(
+      { workerFeeRwf: 15_000, serviceFeeRwf: 1_000, workerId: 'worker-1' },
+      ADMIN,
+      NOW,
+    );
     expect(request.status).toBe('PRICED');
     expect(request.totalRwf).toBe(16_000);
     expect(request.toSnapshot().adjustmentNote).toBeNull();
@@ -99,10 +108,16 @@ describe('ServiceRequest', () => {
   it('rejects zero or fractional prices', () => {
     const request = ServiceRequest.submit(submission(), NOW);
     expect(() =>
-      request.price({ workerFeeRwf: 0, serviceFeeRwf: 0 }, ADMIN),
+      request.price(
+        { workerFeeRwf: 0, serviceFeeRwf: 0, workerId: 'worker-1' },
+        ADMIN,
+      ),
     ).toThrow(InvalidInputError);
     expect(() =>
-      request.price({ workerFeeRwf: 10.5, serviceFeeRwf: 0 }, ADMIN),
+      request.price(
+        { workerFeeRwf: 10.5, serviceFeeRwf: 0, workerId: 'worker-1' },
+        ADMIN,
+      ),
     ).toThrow(InvalidInputError);
   });
 
@@ -154,6 +169,136 @@ describe('ServiceRequest', () => {
       expect(() =>
         priced().cancel(' ', { id: CLIENT, isAdmin: false }),
       ).toThrow(InvalidInputError);
+    });
+  });
+
+  describe('worker hold and confirmation', () => {
+    it('holds the worker when pricing and confirms them after payment', () => {
+      const request = priced();
+      expect(request.assignedWorkerId).toBe('worker-1');
+      request.markPaid(21_000);
+      request.assignWorker(null, ADMIN);
+      expect(request.status).toBe('ASSIGNED');
+      expect(request.assignedWorkerId).toBe('worker-1');
+    });
+
+    it('needs a held worker to price', () => {
+      const request = ServiceRequest.submit(submission(), NOW);
+      expect(() =>
+        request.price(
+          { workerFeeRwf: 20_000, serviceFeeRwf: 1_000, workerId: '' },
+          ADMIN,
+        ),
+      ).toThrow(expect.objectContaining({ code: 'worker_required' }));
+    });
+
+    it('lets ops swap the worker when confirming', () => {
+      const request = priced();
+      request.markPaid(21_000);
+      request.assignWorker('worker-2', ADMIN);
+      expect(request.assignedWorkerId).toBe('worker-2');
+    });
+  });
+
+  describe('payment reminders', () => {
+    it('reminds a priced request at most hourly', () => {
+      const request = priced();
+      request.remind(NOW);
+      expect(() =>
+        request.remind(new Date(NOW.getTime() + 30 * 60_000)),
+      ).toThrow(expect.objectContaining({ code: 'reminder_cooldown' }));
+      expect(() =>
+        request.remind(new Date(NOW.getTime() + 61 * 60_000)),
+      ).not.toThrow();
+    });
+
+    it('only reminds about unpaid prices', () => {
+      expect(() =>
+        ServiceRequest.submit(submission(), NOW).remind(NOW),
+      ).toThrow(expect.objectContaining({ code: 'invalid_status_transition' }));
+    });
+  });
+
+  it('completes automatically, recorded as the system', () => {
+    const request = priced();
+    request.markPaid(21_000);
+    request.assignWorker(null, ADMIN);
+    request.pullChanges();
+    request.autoComplete(NOW);
+    expect(request.status).toBe('COMPLETED');
+    expect(request.pullChanges()).toEqual([
+      {
+        status: 'COMPLETED',
+        actorId: null,
+        note: 'Completed automatically after the visit',
+        at: NOW,
+      },
+    ]);
+  });
+
+  describe('placements', () => {
+    const placement = (over: Partial<SubmitServiceRequest> = {}) =>
+      submission({
+        category: 'HOUSE_HELP',
+        kind: 'PLACEMENT',
+        durationHours: null,
+        placement: {
+          arrangement: 'LIVE_OUT',
+          daysPerWeek: 6,
+          salaryRwf: 80_000,
+        },
+        ...over,
+      });
+
+    it('takes a start date and terms instead of a duration', () => {
+      const request = ServiceRequest.submit(placement(), NOW);
+      expect(request.toSnapshot()).toMatchObject({
+        kind: 'PLACEMENT',
+        durationHours: null,
+        placement: {
+          arrangement: 'LIVE_OUT',
+          daysPerWeek: 6,
+          salaryRwf: 80_000,
+        },
+      });
+    });
+
+    it.each([
+      [{ placement: null }, 'placement_required'],
+      [
+        {
+          placement: {
+            arrangement: 'LIVE_OUT' as const,
+            daysPerWeek: 0,
+            salaryRwf: null,
+          },
+        },
+        'invalid_days',
+      ],
+      [
+        {
+          placement: {
+            arrangement: 'LIVE_IN' as const,
+            daysPerWeek: 5,
+            salaryRwf: -1,
+          },
+        },
+        'invalid_salary',
+      ],
+    ])('rejects %o', (over, code) => {
+      expect(() => ServiceRequest.submit(placement(over), NOW)).toThrow(
+        expect.objectContaining({ code }),
+      );
+    });
+
+    it('ignores any duration on a placement, and needs one on a visit', () => {
+      expect(
+        ServiceRequest.submit(placement({ durationHours: 4 }), NOW).toSnapshot()
+          .durationHours,
+      ).toBeNull();
+      expect(() =>
+        ServiceRequest.submit(submission({ durationHours: null }), NOW),
+      ).toThrow(expect.objectContaining({ code: 'invalid_duration' }));
     });
   });
 });

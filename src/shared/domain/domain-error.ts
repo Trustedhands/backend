@@ -5,7 +5,12 @@
  */
 export abstract class DomainError extends Error {
   abstract readonly kind:
-    'not_found' | 'conflict' | 'invalid' | 'forbidden' | 'unavailable';
+    | 'unauthorized'
+    | 'not_found'
+    | 'conflict'
+    | 'invalid'
+    | 'forbidden'
+    | 'unavailable';
 
   constructor(
     readonly code: string,
@@ -14,6 +19,11 @@ export abstract class DomainError extends Error {
     super(message);
     this.name = new.target.name;
   }
+}
+
+/** Credentials or a session are missing, wrong or expired. */
+export class UnauthorizedError extends DomainError {
+  readonly kind = 'unauthorized';
 }
 
 export class NotFoundError extends DomainError {

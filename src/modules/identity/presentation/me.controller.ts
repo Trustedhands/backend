@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
 import { CurrentUser } from '../../../shared/auth/decorators.js';
 import { AddressDto } from '../../../shared/http/address.dto.js';
 import { ProfilesService } from '../application/profiles.service.js';
-import { CreateProfileDto, MeView, UpdateProfileDto } from './profile.dto.js';
+import { MeView, UpdateProfileDto } from './profile.dto.js';
 
 @ApiTags('me')
 @ApiBearerAuth()
@@ -15,14 +15,6 @@ export class MeController {
   @Get()
   me(@CurrentUser() user: AuthUser): Promise<MeView> {
     return this.profiles.me(user);
-  }
-
-  @Post('profile')
-  createProfile(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: CreateProfileDto,
-  ): Promise<MeView> {
-    return this.profiles.create(user, dto);
   }
 
   @Patch('profile')

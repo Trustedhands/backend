@@ -52,7 +52,13 @@ export class PaymentQueries {
         KIGALI_OFFSET_MS,
     );
 
-    const request = { select: { number: true, category: true } } as const;
+    const request = {
+      select: {
+        number: true,
+        category: true,
+        serviceType: { select: { label: true } },
+      },
+    } as const;
     const [payments, refunds, month, wallet] = await Promise.all([
       this.prisma.payment.findMany({
         where: { clientId },
@@ -61,7 +67,11 @@ export class PaymentQueries {
         include: { serviceRequest: request },
       }),
       this.prisma.refund.findMany({
-        where: { payment: { clientId } },
+        // Failed refunds are retried by ops; the client hasn't lost anything
+        where: {
+          payment: { clientId },
+          status: { in: ['PENDING', 'SUCCESSFUL'] },
+        },
         orderBy: { createdAt: 'desc' },
         take: 100,
         include: { payment: { include: { serviceRequest: request } } },
@@ -86,6 +96,7 @@ export class PaymentQueries {
         id: p.id,
         kind: 'PAYMENT' as const,
         category: p.serviceRequest.category,
+        categoryLabel: p.serviceRequest.serviceType.label,
         serviceRequestReference: formatRequestRef(p.serviceRequest.number),
         receiptReference:
           p.status === 'SUCCESSFUL' ? formatReceiptRef(p.receiptNumber) : null,
@@ -97,13 +108,17 @@ export class PaymentQueries {
         id: r.id,
         kind: 'REFUND' as const,
         category: r.payment.serviceRequest.category,
+        categoryLabel: r.payment.serviceRequest.serviceType.label,
         serviceRequestReference: formatRequestRef(
           r.payment.serviceRequest.number,
         ),
         receiptReference: formatReceiptRef(r.payment.receiptNumber),
         amountRwf: r.amountRwf,
-        status: 'CREDITED' as const,
-        at: r.createdAt,
+        status:
+          r.status === 'SUCCESSFUL'
+            ? ('REFUNDED' as const)
+            : ('PENDING' as const),
+        at: r.completedAt ?? r.createdAt,
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 

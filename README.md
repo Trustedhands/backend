@@ -8,7 +8,8 @@ TrustedHands is **ops-mediated**. Clients describe a job, the TrustedHands team 
 
 - **NestJS 12** (ESM), domain-driven layout
 - **Prisma 7** with the `pg` driver adapter, on **Supabase Postgres**
-- **Supabase Auth**: the frontends sign users in; the API verifies the access tokens against the project's JWKS
+- **Own JWT auth**: email + password, short-lived access tokens, rotating refresh tokens in an httpOnly cookie (see [Authentication](#authentication))
+- **Resend** for email and **Africa's Talking** for SMS (verification and password-reset codes)
 - **MTN MoMo Collections API** for payments
 - Vitest (unit + e2e), oxlint, Prettier
 
@@ -23,7 +24,7 @@ pnpm start:dev        # http://localhost:3000
 
 - API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from.
 - Health check: `GET /health`
-- All other routes are under `/v1` and need `Authorization: Bearer <supabase access token>`.
+- All other routes are under `/v1` and need `Authorization: Bearer <access token>` (from `/v1/auth/login` or `/v1/auth/register`).
 
 ### Database connections
 
@@ -38,11 +39,49 @@ All app tables live in the **`app` schema**, not `public`. Supabase's Data API (
 
 ### Making someone an admin
 
-Admins are ordinary Supabase Auth users whose profile has `role = ADMIN`. After they've signed up:
+Staff are accounts with `role = ADMIN` and a **staff role** that decides what they can do (`src/shared/auth/permissions.ts`):
+
+| Staff role        | Can                                                              |
+| ----------------- | ---------------------------------------------------------------- |
+| Super admin       | Everything, including settings and the team                      |
+| Verification lead | Create and verify workers                                        |
+| Finance           | Payments, refunds and payouts; view tickets                      |
+| Customer service  | Tickets: assign, internal notes, email replies                   |
+
+Every staff member can view the dashboard, requests, workers, clients and reviews. Admin endpoints declare what they need with `@RequirePermission()`. Roles are read from the database on each request, so changes take effect immediately.
+
+To bootstrap the first super admin, register an account, then run:
 
 ```bash
-pnpm admin:promote ops@example.com "Ops Name"
+pnpm admin:promote ops@example.com
 ```
+
+Invite everyone else from Settings & team. Invitations are emailed links to `ADMIN_APP_URL/accept-invite` that work once and expire after 7 days.
+
+## Authentication
+
+| Endpoint (under `/v1/auth`)            | What it does                                                         |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| `POST register`                        | Creates the account and its client profile, emails a code, signs in  |
+| `POST login`                           | Email + password                                                     |
+| `POST refresh`                         | Rotates the refresh cookie, returns a new access token               |
+| `POST logout`                          | Revokes this device's session                                        |
+| `POST email/send-code`, `email/verify` | Email verification by 6-digit code                                   |
+| `POST phone/send-code`, `phone/verify` | Phone verification by SMS code                                       |
+| `POST password/forgot`, `password/reset` | Reset by emailed code; signs out every other session              |
+| `POST password/change`                 | Needs the current password; signs out other sessions                 |
+
+How it works:
+
+- **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 15 minutes. They carry only the user id; the role is read from the database on each admin request, so revoking it takes effect immediately.
+- **Refresh tokens** are random, valid for 30 days, and stored only as SHA-256 hashes. They're set as an `httpOnly`, `SameSite=Lax` cookie scoped to `/v1/auth`, and are `Secure` in production. Every refresh rotates the token. Presenting an already-rotated token is treated as theft and revokes that whole session chain.
+- **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
+- **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
+- **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
+- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, configure Express `trust proxy` so the limits apply to client IPs.
+- **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
+- **SMS** goes through Africa's Talking (`SMS_PROVIDER=africastalking`), using the sandbox when `AFRICAS_TALKING_USERNAME=sandbox`.
+- **`log` providers** print messages to the server log instead of sending them. They're handy locally, and the server refuses to start in production with either set to `log`.
 
 ## Architecture
 
@@ -50,7 +89,7 @@ pnpm admin:promote ops@example.com "Ops Name"
 src/
   config/            env validation
   shared/
-    auth/            Supabase JWT guard (global), @Public(), @Roles(), @CurrentUser()
+    auth/            access tokens, global guard, @Public(), @Roles(), @CurrentUser()
     database/        PrismaService
     domain/          DomainError hierarchy (mapped to HTTP by DomainExceptionFilter)
     http/            filters, shared DTOs
@@ -63,10 +102,17 @@ src/
 
 Bounded contexts:
 
-- **identity**: client profile and home address. Email and phone verification state is read from `auth.users`.
-- **workers**: admin-managed worker records, plus rating and job stats.
+- **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
+- **identity**: client profile and home address.
+- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and **two-admin verification**. Whoever added a worker can't verify them, and every ID check must be ticked. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
+- **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
+- **team**: staff roles, invitations, and removing access.
+- **operations**: dashboard figures (finance figures only for payment roles), global search and the clients list.
+- **finance**: escrow, release, refunds, payouts, the worker wallets, CSV export, and the settlement job.
+- **reviews**: clients rate the worker on a completed job, once per job. Ratings of 2 or below are emailed to `SUPPORT_INBOX`.
+- **support**: "Report an issue" tickets (`OPEN → ACTIVE → CLOSED`, reopenable), each optionally linked to a booking. New tickets are emailed to `SUPPORT_INBOX`.
 
 Contexts with real invariants (service requests, payments) use aggregates, repositories and optimistic locking. The CRUD-shaped ones (identity, workers) use Prisma directly from the application service. Reads go through query services that shape rows into views, separate from the command path.
 
@@ -83,6 +129,20 @@ Cancel: client before payment; ops until work starts (refund separately).
 
 Every transition is recorded in `service_request_events`, which drives the progress timeline in the app.
 
+When ops prices a request they also **hold** a worker. The worker must be verified, active and offer that service. Clients don't see the worker until it's **confirmed** after payment ("Confirm worker" moves the request to `ASSIGNED`). The platform fee comes from Settings, and placements are charged the match fee instead. "Suggested workers" ranks candidates by the matching priority in Settings: availability (clashing bookings, with a 30-minute buffer), language, gender, rating, and distance from the worker's GPS point to the address.
+
+### Long-term placements
+
+House help and long-term drivers are **placements**, not visits.
+
+- **Which services:** services with `feeType = MATCH` are always placements. `EITHER` services, such as Driver, let the client choose a visit or a placement.
+- **What the request carries:** a **start date** (`scheduledAt`), live-in or live-out, days per week, and optionally the monthly salary the client has in mind. There's no duration. The salary is agreed and paid directly between the client and the worker.
+- **Pricing:** ops holds a worker and the price is the **match fee** from Settings. No worker fee is charged, and on release the whole fee goes to the platform.
+- **Completion:** the client confirms the worker has started. Otherwise the release window counts from the start date.
+- **Matching:** a worker committed to a placement is unavailable for other placements, and for visits from the placement's start date.
+
+Admin actions such as verifications, settings changes and team changes are written to `audit_events`.
+
 ### Payments
 
 1. `POST /v1/service-requests/:id/payments { msisdn }` sends a MoMo prompt to the payer's phone. The status is `PENDING`.
@@ -95,14 +155,55 @@ The design rules behind this flow:
 - The price can't change while a charge is pending.
 - A network error on `requesttopay` leaves the payment `PENDING`, since MoMo may have accepted it. Only a definite 4xx rejection marks it `FAILED`.
 
-The MoMo sandbox only accepts `EUR` and its own test numbers. Set `MOMO_TARGET_ENVIRONMENT` and `MOMO_CURRENCY=RWF` for production, which also enforces MTN Rwanda numbers (078/079).
+The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL` and `MOMO_COLLECTION_CURRENCY=RWF`. That also limits payers to MTN Rwanda numbers (078/079).
+
+MTN's failure codes (e.g. `NOT_ENOUGH_FUNDS`) are logged as-is and shown to the payer as plain-language messages.
+
+### Escrow, release, refunds and payouts
+
+Money is tracked in an append-only ledger (`ledger_entries`). Each account's balance is the sum of its entries, and every entry is written in the same transaction as the state change behind it.
+
+| When | Ledger |
+| --- | --- |
+| A client's MoMo payment succeeds | **Escrow** +paid |
+| The job is released | Escrow −paid; **worker wallet** +worker fee; **platform** +fee (placements: all to the platform) |
+| A refund is issued before release | Escrow −refund. The worker's share is reduced first, then the fee |
+| A refund is issued after release | Platform −refund. Worker wallets are never clawed back |
+| A payout is started | Worker wallet −amount (held, so it can't be paid twice) |
+| A refund or payout fails | The held amount is reversed |
+
+- **Release** happens when the client marks the job done. If they don't, the job auto-completes once the visit has been over for **release window** hours (Settings, default 24).
+- **Refunds** go back to the payer's MoMo number through **MoMo Disbursement** (`POST /v1/admin/finance/refunds`).
+- **Payouts** are started by finance staff. MoMo payouts go out immediately through Disbursement. Bank payouts are confirmed by hand with `mark-paid` or `mark-failed`.
+
+The **settlement job** runs every minute in each API instance (`src/modules/finance/application/settlement.job.ts`). It:
+
+- auto-completes and releases jobs that are due
+- settles MoMo payments, refunds and payouts still pending
+
+Every step is idempotent: rows are locked, and status updates are conditional on the current state, so overlapping runs and several instances are safe.
+
+MoMo callbacks to register on the API user:
+
+- Collections: `MOMO_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/<paymentId>`)
+- Disbursement: `MOMO_DSB_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/refunds/<id>` and `/payouts/<id>`)
+
+Callback bodies are never trusted; they only trigger a status check against MoMo. Without callbacks (e.g. locally), the settlement job settles everything within a minute or two.
 
 ## Testing
 
 ```bash
 pnpm test       # unit tests (domain)
-pnpm test:e2e   # full lifecycle against the database in .env; cleans up after itself
+pnpm test:e2e   # auth + full lifecycle against the database in .env; cleans up after itself
 pnpm lint && pnpm typecheck
 ```
 
-The e2e suite fakes only the token verifier and the MoMo gateway.
+The e2e suites use real auth; only email, SMS and MoMo are faked (see `test/support.ts`).
+
+### Ticket attachments
+
+Clients can attach up to 3 files of up to 5 MB each.
+
+- **Allowed types:** JPG, PNG or PDF. The type is detected from the file's bytes, never from its name or the type the browser claims.
+- **Storage:** files are stored in Postgres (`ticket_attachments`). That's fine at MVP volumes. To move them to object storage, change only `SupportService.create` and `SupportService.attachment`.
+- **Serving:** files are served with `nosniff` and `Content-Security-Policy: sandbox`, so an uploaded file can't run script on the API's origin.

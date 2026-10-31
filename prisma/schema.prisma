@@ -2,8 +2,9 @@
 //
 // Tables live in the `app` schema rather than `public` so Supabase's Data API
 // (PostgREST, reachable with the public anon key) cannot see them. All access
-// goes through the NestJS API. User identities live in Supabase Auth
-// (`auth.users`); `Profile.id` is the same UUID.
+// goes through the NestJS API, which also owns authentication (`users`,
+// `refresh_tokens`, `verification_codes`). `Profile.id` is the same UUID as
+// `User.id`.
 //
 // Money is stored as whole Rwandan francs (RWF has no minor unit in practice).
 
@@ -24,6 +25,16 @@ datasource db {
 enum UserRole {
   CLIENT
   ADMIN
+
+  @@schema("app")
+}
+
+/// What an ADMIN may do; see shared/auth/permissions.ts
+enum StaffRole {
+  SUPER_ADMIN
+  VERIFICATION_LEAD
+  FINANCE
+  CUSTOMER_SERVICE
 
   @@schema("app")
 }
@@ -69,10 +80,90 @@ enum IdDocumentType {
   @@schema("app")
 }
 
+/// Login credentials and contact verification. Profile holds everything else.
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased
+  email           String    @unique
+  /// scrypt$N$r$p$salt$hash
+  passwordHash    String
+  /// E.164, e.g. +250781234567
+  phone           String?
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+  /// Bumped when a session is issued or refreshed ("Last active")
+  lastActiveAt    DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  profile           Profile?
+  refreshTokens     RefreshToken[]
+  verificationCodes VerificationCode[]
+
+  @@index([phone])
+  @@map("users")
+  @@schema("app")
+}
+
+/// Opaque, rotating refresh tokens. Each login starts a family; reusing a
+/// rotated token revokes the whole family (likely theft).
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  familyId  String    @db.Uuid
+  /// SHA-256 of the token; the token itself is never stored
+  tokenHash String    @unique
+  expiresAt DateTime
+  /// Set when rotated (exchanged for a new token)
+  usedAt    DateTime?
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+  @@schema("app")
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PHONE_VERIFY
+  PASSWORD_RESET
+
+  @@schema("app")
+}
+
+/// One-time 6-digit codes, stored hashed.
+model VerificationCode {
+  id         String              @id @default(uuid()) @db.Uuid
+  userId     String              @db.Uuid
+  purpose    VerificationPurpose
+  /// The email or phone the code was sent to
+  target     String
+  codeHash   String
+  attempts   Int                 @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt])
+  @@map("verification_codes")
+  @@schema("app")
+}
+
 model Profile {
-  /// Same UUID as auth.users.id
+  /// Same UUID as User.id
   id                 String      @id @db.Uuid
   role               UserRole    @default(CLIENT)
+  /// Set for ADMIN profiles
+  staffRole          StaffRole?
+  /// Staff access removed; the account can no longer use admin endpoints
+  staffDisabledAt    DateTime?
   accountType        AccountType @default(INDIVIDUAL)
   fullName           String
   companyName        String?
@@ -89,6 +180,7 @@ model Profile {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
+  user            User                 @relation(fields: [id], references: [id], onDelete: Cascade)
   addresses       Address[]
   kycSubmissions  KycSubmission[]
   paymentMethods  SavedPaymentMethod[]
@@ -97,6 +189,9 @@ model Profile {
   walletEntries   WalletEntry[]
   reviews         Review[]
   tickets         SupportTicket[]
+  assignedTickets SupportTicket[]      @relation("TicketAssignee")
+  ticketNotes     TicketNote[]
+  ticketMessages  TicketMessage[]
 
   @@map("profiles")
   @@schema("app")
@@ -160,36 +255,182 @@ model SavedPaymentMethod {
 
 // ─── Workers (managed by admins; there is no worker app) ────────────────────
 
-enum ServiceCategory {
-  CLEANING
-  COOKING
-  ERRANDS
-  REPAIRS
-  LAUNDRY
-  DRIVER
-  OTHER
+enum WorkerStatus {
+  /// Saved but not yet sent to verification
+  DRAFT
+  PENDING_VERIFICATION
+  /// Checked by a second admin; can be assigned to jobs
+  VERIFIED
+  DECLINED
+
+  @@schema("app")
+}
+
+enum WorkerDocumentKind {
+  PHOTO
+  ID_FRONT
+  ID_BACK
 
   @@schema("app")
 }
 
 model Worker {
-  id         String            @id @default(uuid()) @db.Uuid
-  fullName   String
-  phone      String
-  gender     Gender
-  languages  Language[]
-  categories ServiceCategory[]
-  photoPath  String?
-  idVerified Boolean           @default(false)
-  active     Boolean           @default(true)
-  notes      String?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  id                 String          @id @default(uuid()) @db.Uuid
+  status             WorkerStatus    @default(DRAFT)
+  /// Deactivated workers keep their history but can't be assigned
+  active             Boolean         @default(true)
+  fullName           String
+  gender             Gender
+  dateOfBirth        DateTime?       @db.Date
+  nationality        String?
+  countryOfResidence String?
+  languages          Language[]
+  /// ServiceType keys
+  categories         String[]
+  phone              String
+  email              String?
+  province           String?
+  district           String?
+  sector             String?
+  cell               String?
+  village            String?
+  latitude           Float?
+  longitude          Float?
+  experience         String?
+  idType             IdDocumentType?
+  idNumber           String?
+  nextOfKinName      String?
+  nextOfKinRelation  String?
+  nextOfKinPhone     String?
+  nextOfKinAddress   String?
+  nextOfKinIdNumber  String?
+  /// E.164; where payouts are sent by MoMo
+  payoutMsisdn       String?
+  payoutBankName     String?
+  payoutBankAccount  String?
+  notes              String?
+  createdById        String?         @db.Uuid
+  verifiedById       String?         @db.Uuid
+  verifiedAt         DateTime?
+  declineReason      String?
+  /// Verifier's checklist, e.g. {"fullName":true,"photo":false}
+  verificationChecks Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
-  assignments ServiceRequest[]
-  reviews     Review[]
+  assignments   ServiceRequest[]
+  reviews       Review[]
+  documents     WorkerDocument[]
+  payouts       Payout[]
+  ledgerEntries LedgerEntry[]
 
+  @@index([status])
   @@map("workers")
+  @@schema("app")
+}
+
+/// Worker photo and ID scans. Stored in Postgres for the MVP, like ticket attachments.
+model WorkerDocument {
+  id           String             @id @default(uuid()) @db.Uuid
+  workerId     String             @db.Uuid
+  kind         WorkerDocumentKind
+  filename     String
+  contentType  String
+  sizeBytes    Int
+  data         Bytes
+  uploadedById String?            @db.Uuid
+  createdAt    DateTime           @default(now())
+
+  worker Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, kind])
+  @@map("worker_documents")
+  @@schema("app")
+}
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+enum ServiceFeeType {
+  /// Per visit: worker fee + platform service fee
+  SERVICE
+  /// Long-term placement: one-off match fee
+  MATCH
+  /// Client chooses one-time visit or long-term placement
+  EITHER
+
+  @@schema("app")
+}
+
+/// Services clients can request; ops can add, rename or hide them.
+model ServiceType {
+  /// Stable key, e.g. CLEANING
+  key          String         @id
+  label        String
+  /// Shown to ops when pricing, e.g. "8,000 RWF / hour"
+  pricingGuide String?
+  feeType      ServiceFeeType @default(SERVICE)
+  visible      Boolean        @default(true)
+  sortOrder    Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  requests ServiceRequest[]
+
+  @@map("service_types")
+  @@schema("app")
+}
+
+/// Single row (id = 1). Changes apply to new requests and are audited.
+model PlatformSettings {
+  id                  Int      @id @default(1)
+  serviceFeeRwf       Int      @default(1000)
+  matchFeeRwf         Int      @default(5000)
+  /// Release the worker share this long after the visit ends if the client hasn't confirmed
+  releaseAfterHours   Int      @default(24)
+  /// Ordered criteria for suggested workers: AVAILABILITY, LANGUAGE, GENDER, RATING, DISTANCE
+  matchingPriority    String[] @default(["AVAILABILITY", "LANGUAGE", "GENDER", "RATING", "DISTANCE"])
+  momoEnabled         Boolean  @default(true)
+  clientWalletEnabled Boolean  @default(false)
+  vouchersEnabled     Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+
+  @@map("platform_settings")
+  @@schema("app")
+}
+
+/// Who did what in the admin console.
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Null for the system (e.g. scheduled jobs)
+  actorId    String?  @db.Uuid
+  /// e.g. worker.created, worker.verified, settings.updated, team.invited
+  action     String
+  entityType String
+  entityId   String
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+  @@map("audit_events")
+  @@schema("app")
+}
+
+model StaffInvitation {
+  id          String    @id @default(uuid()) @db.Uuid
+  /// Lower-cased
+  email       String
+  staffRole   StaffRole
+  /// SHA-256 of the emailed token
+  tokenHash   String    @unique
+  invitedById String    @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@map("staff_invitations")
   @@schema("app")
 }
 
@@ -212,6 +453,22 @@ enum ServiceRequestStatus {
   @@schema("app")
 }
 
+enum RequestKind {
+  /// One-time visit, priced as worker fee + service fee
+  VISIT
+  /// Long-term placement (house help, driver), priced as a match fee
+  PLACEMENT
+
+  @@schema("app")
+}
+
+enum PlacementArrangement {
+  LIVE_IN
+  LIVE_OUT
+
+  @@schema("app")
+}
+
 enum GenderPreference {
   ANY
   FEMALE
@@ -221,16 +478,25 @@ enum GenderPreference {
 }
 
 model ServiceRequest {
-  id                 String               @id @default(uuid()) @db.Uuid
+  id                   String                @id @default(uuid()) @db.Uuid
   /// Human-readable sequence, shown as SR-<number>
-  number             Int                  @unique @default(autoincrement())
-  clientId           String               @db.Uuid
-  category           ServiceCategory
-  description        String
-  scheduledAt        DateTime
-  durationHours      Decimal              @db.Decimal(4, 1)
-  preferredGender    GenderPreference     @default(ANY)
-  preferredLanguages Language[]
+  number               Int                   @unique @default(autoincrement())
+  clientId             String                @db.Uuid
+  /// ServiceType key
+  category             String
+  kind                 RequestKind           @default(VISIT)
+  description          String
+  scheduledAt          DateTime
+  /// Visits only; null for placements
+  durationHours        Decimal?              @db.Decimal(4, 1)
+  /// Placements only: live-in or live-out
+  placementArrangement PlacementArrangement?
+  /// Placements only: working days per week
+  placementDaysPerWeek Int?                  @db.SmallInt
+  /// Placements only: monthly salary the client has in mind (paid by them, not through us)
+  placementSalaryRwf   Int?
+  preferredGender      GenderPreference      @default(ANY)
+  preferredLanguages   Language[]
 
   // Address snapshot, so later edits to the client's address don't rewrite history
   addressDistrict  String
@@ -247,15 +513,21 @@ model ServiceRequest {
   pricedAt           DateTime?
   adjustmentNote     String?
   voucherId          String?              @db.Uuid
+  /// Held while priced/paid; confirmed once ASSIGNED
   assignedWorkerId   String?              @db.Uuid
+  /// Last payment reminder sent to the client
+  remindedAt         DateTime?
   cancellationReason String?
   completedAt        DateTime?
+  /// When escrow was split to the worker and platform
+  releasedAt         DateTime?
   /// Optimistic concurrency token, bumped on every update
   version            Int                  @default(0)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
   client         Profile               @relation(fields: [clientId], references: [id])
+  serviceType    ServiceType           @relation(fields: [category], references: [key])
   assignedWorker Worker?               @relation(fields: [assignedWorkerId], references: [id])
   voucher        Voucher?              @relation(fields: [voucherId], references: [id])
   events         ServiceRequestEvent[]
@@ -323,6 +595,7 @@ model Payment {
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id])
   client         Profile        @relation(fields: [clientId], references: [id])
   refunds        Refund[]
+  ledgerEntries  LedgerEntry[]
 
   @@index([clientId, createdAt])
   @@index([serviceRequestId])
@@ -331,18 +604,34 @@ model Payment {
 }
 
 /// Refunds are credited to the client's wallet.
+/// Money sent back to the payer's MoMo number (Disbursement transfer).
 model Refund {
-  id         String   @id @default(uuid()) @db.Uuid
-  paymentId  String   @db.Uuid
-  amountRwf  Int
-  reason     String
-  issuedById String   @db.Uuid
-  createdAt  DateTime @default(now())
+  id                    String        @id @default(uuid()) @db.Uuid
+  paymentId             String        @db.Uuid
+  amountRwf             Int
+  reason                String
+  issuedById            String        @db.Uuid
+  /// The ticket it resolves, if any
+  ticketId              String?       @db.Uuid
+  status                PaymentStatus @default(PENDING)
+  /// E.164-less MSISDN the money is sent to (the payer's number)
+  msisdn                String
+  /// ESCROW before the worker share is released; PLATFORM after
+  chargedTo             LedgerAccount
+  /// X-Reference-Id sent to MoMo Disbursement
+  providerReference     String        @unique @db.Uuid
+  providerTransactionId String?
+  failureReason         String?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  payment     Payment      @relation(fields: [paymentId], references: [id])
-  walletEntry WalletEntry?
+  payment       Payment       @relation(fields: [paymentId], references: [id])
+  walletEntry   WalletEntry?
+  ledgerEntries LedgerEntry[]
 
   @@index([paymentId])
+  @@index([status])
   @@map("refunds")
   @@schema("app")
 }
@@ -392,16 +681,27 @@ model Voucher {
 
 // ─── Reviews & support ──────────────────────────────────────────────────────
 
+enum ReviewTag {
+  ON_TIME
+  THOROUGH
+  FRIENDLY
+  RESPECTFUL
+  COMMUNICATED_WELL
+
+  @@schema("app")
+}
+
 model Review {
-  id               String   @id @default(uuid()) @db.Uuid
-  serviceRequestId String   @unique @db.Uuid
-  clientId         String   @db.Uuid
-  workerId         String   @db.Uuid
-  rating           Int      @db.SmallInt
-  /// e.g. on_time, thorough, friendly, respectful, communicated_well
-  tags             String[]
+  id               String      @id @default(uuid()) @db.Uuid
+  serviceRequestId String      @unique @db.Uuid
+  clientId         String      @db.Uuid
+  workerId         String      @db.Uuid
+  rating           Int         @db.SmallInt
+  /// "What stood out?"
+  tags             ReviewTag[]
+  /// Shared with the worker by the ops team
   comment          String?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime    @default(now())
 
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id])
   client         Profile        @relation(fields: [clientId], references: [id])
@@ -413,7 +713,9 @@ model Review {
 }
 
 enum TicketStatus {
+  /// Received, not yet picked up
   OPEN
+  /// Ops is working on it
   ACTIVE
   CLOSED
 
@@ -426,18 +728,165 @@ model SupportTicket {
   number           Int          @unique @default(autoincrement())
   clientId         String       @db.Uuid
   serviceRequestId String?      @db.Uuid
+  /// Derived from the description at creation; ops can rename it
   subject          String
   description      String
-  attachmentPaths  String[]
   status           TicketStatus @default(OPEN)
+  /// Staff member handling it
+  assignedToId     String?      @db.Uuid
+  closedAt         DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  client         Profile         @relation(fields: [clientId], references: [id])
-  serviceRequest ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  client         Profile            @relation(fields: [clientId], references: [id])
+  assignedTo     Profile?           @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  serviceRequest ServiceRequest?    @relation(fields: [serviceRequestId], references: [id])
+  attachments    TicketAttachment[]
+  notes          TicketNote[]
+  messages       TicketMessage[]
 
   @@index([clientId, createdAt])
   @@index([status])
   @@map("support_tickets")
+  @@schema("app")
+}
+
+/// Photos/documents attached to a ticket. Stored in Postgres for the MVP
+/// (small, capped files); see AttachmentStore to move them to object storage.
+model TicketAttachment {
+  id          String   @id @default(uuid()) @db.Uuid
+  ticketId    String   @db.Uuid
+  filename    String
+  contentType String
+  sizeBytes   Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
+  @@schema("app")
+}
+
+/// Staff-only notes on a ticket.
+model TicketNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author Profile       @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_notes")
+  @@schema("app")
+}
+
+/// Replies sent to the client (by email).
+model TicketMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author Profile       @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+  @@schema("app")
+}
+
+// ─── Ledger & payouts ───────────────────────────────────────────────────────
+
+enum LedgerAccount {
+  /// Paid by clients, service not yet complete
+  ESCROW
+  /// Platform fees (and match fees)
+  PLATFORM
+  /// Owed to a worker (workerId set)
+  WORKER
+
+  @@schema("app")
+}
+
+enum LedgerEntryKind {
+  PAYMENT_RECEIVED
+  RELEASED_TO_WORKER
+  RELEASED_TO_PLATFORM
+  REFUND
+  /// A refund transfer failed; the reserved amount goes back
+  REFUND_REVERSED
+  PAYOUT
+  /// A payout failed; the amount goes back to the worker's wallet
+  PAYOUT_REVERSED
+
+  @@schema("app")
+}
+
+/// Append-only. An account's balance is the sum of its entries.
+model LedgerEntry {
+  id               String          @id @default(uuid()) @db.Uuid
+  account          LedgerAccount
+  /// Set for WORKER entries
+  workerId         String?         @db.Uuid
+  kind             LedgerEntryKind
+  /// Positive credits, negative debits
+  amountRwf        Int
+  serviceRequestId String?         @db.Uuid
+  paymentId        String?         @db.Uuid
+  refundId         String?         @db.Uuid
+  payoutId         String?         @db.Uuid
+  createdAt        DateTime        @default(now())
+
+  worker  Worker?  @relation(fields: [workerId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+  refund  Refund?  @relation(fields: [refundId], references: [id])
+  payout  Payout?  @relation(fields: [payoutId], references: [id])
+
+  @@index([account, createdAt])
+  @@index([workerId])
+  @@index([serviceRequestId])
+  @@map("ledger_entries")
+  @@schema("app")
+}
+
+enum PayoutMethod {
+  MOMO
+  BANK
+
+  @@schema("app")
+}
+
+/// Money paid out of a worker's wallet, started by finance staff.
+model Payout {
+  id                    String        @id @default(uuid()) @db.Uuid
+  workerId              String        @db.Uuid
+  amountRwf             Int
+  method                PayoutMethod
+  status                PaymentStatus @default(PENDING)
+  /// Snapshot of where it was sent: MSISDN, or "Bank · account"
+  destination           String
+  initiatedById         String        @db.Uuid
+  /// MoMo X-Reference-Id; null for bank payouts
+  providerReference     String?       @unique @db.Uuid
+  providerTransactionId String?
+  /// Bank transfer reference entered by finance
+  manualReference       String?
+  failureReason         String?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  worker        Worker        @relation(fields: [workerId], references: [id])
+  ledgerEntries LedgerEntry[]
+
+  @@index([workerId, createdAt])
+  @@index([status])
+  @@map("payouts")
   @@schema("app")
 }

@@ -41,6 +41,9 @@ export class ServiceRequestsController {
     const { id } = await this.service.submit({
       clientId: user.id,
       ...dto,
+      placement: dto.placement
+        ? { ...dto.placement, salaryRwf: dto.placement.salaryRwf ?? null }
+        : null,
       address: {
         ...dto.address,
         latitude: dto.address.latitude ?? null,

@@ -763,6 +763,10 @@ export class FinanceService {
       if (!count || outcome.status === 'SUCCESSFUL') return;
 
       // Failed: give back what was reserved
+      let auditEntity: {
+        entityType: 'service_request' | 'payout';
+        entityId: string;
+      } = { entityType: 'payout', entityId: row.id };
       if (kind === 'refunds') {
         const refund = row as Refund;
         const payment = await tx.payment.findUniqueOrThrow({
@@ -778,6 +782,11 @@ export class FinanceService {
             serviceRequestId: payment.serviceRequestId,
           },
         ]);
+        // Refunds are audited on their request, like refund_issued
+        auditEntity = {
+          entityType: 'service_request',
+          entityId: payment.serviceRequestId,
+        };
       } else {
         const payout = row as Payout;
         await postLedger(tx, [
@@ -796,9 +805,11 @@ export class FinanceService {
           {
             actorId,
             action: `${kind === 'refunds' ? 'refund' : 'payout'}.failed`,
-            entityType: 'payout',
-            entityId: row.id,
-            data: { reason: outcome.reason },
+            ...auditEntity,
+            data: {
+              reason: outcome.reason,
+              [kind === 'refunds' ? 'refundId' : 'payoutId']: row.id,
+            },
           },
           tx,
         );
@@ -892,6 +903,6 @@ function kigaliMonthStart(now: Date): Date {
 /** Quotes a CSV cell; neutralises spreadsheet formulas. */
 function csvCell(value: string | number): string {
   let s = String(value);
-  if (/^[=+\-@]/.test(s) && typeof value === 'string') s = `'${s}`;
+  if (/^[=+\-@\t\r]/.test(s) && typeof value === 'string') s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

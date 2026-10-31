@@ -149,7 +149,7 @@ export class ConfigurationService {
     const { key: _ignored, ...data } = dto;
     const after = await this.prisma.serviceType.update({
       where: { key },
-      data,
+      data: { ...data, label: data.label?.trim() },
     });
     const changes = diff(toServiceTypeView(before), toServiceTypeView(after));
     if (Object.keys(changes).length) {

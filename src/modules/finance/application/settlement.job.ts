@@ -92,6 +92,7 @@ export class SettlementJob
         },
       },
       select: { id: true, scheduledAt: true, durationHours: true },
+      orderBy: { scheduledAt: 'asc' },
       take: BATCH,
     });
     for (const c of candidates) {

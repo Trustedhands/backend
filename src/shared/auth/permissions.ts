@@ -9,7 +9,7 @@ export const PERMISSIONS = [
   'workers.view',
   /** Create and edit workers, upload documents, send to verification */
   'workers.manage',
-  /** Verify or decline a worker created by someone else */
+  /** Verify or decline workers pending verification */
   'workers.verify',
   'clients.view',
   'payments.view',

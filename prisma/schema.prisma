@@ -259,7 +259,7 @@ enum WorkerStatus {
   /// Saved but not yet sent to verification
   DRAFT
   PENDING_VERIFICATION
-  /// Checked by a second admin; can be assigned to jobs
+  /// Checked by an admin against the ID; can be assigned to jobs
   VERIFIED
   DECLINED
 

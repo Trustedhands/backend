@@ -49,6 +49,13 @@ type WorkerWithDocs = Worker & {
   >;
 };
 
+const LIST_ORDER: Record<Worker['status'], number> = {
+  PENDING_VERIFICATION: 0,
+  DRAFT: 1,
+  VERIFIED: 2,
+  DECLINED: 3,
+};
+
 const docSelect = {
   select: {
     kind: true,
@@ -83,10 +90,11 @@ export class WorkersService {
           : {}),
       },
       include: { documents: docSelect },
-      // Pending verification first, then alphabetical
-      orderBy: [{ status: 'asc' }, { fullName: 'asc' }],
+      orderBy: { fullName: 'asc' },
       take: 200,
     });
+    // Waiting for verification first, then drafts, verified, declined
+    workers.sort((a, b) => LIST_ORDER[a.status] - LIST_ORDER[b.status]);
     return this.toSummaries(workers);
   }
 

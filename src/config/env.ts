@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Min,
   MinLength,
   ValidateIf,
   validateSync,
@@ -77,6 +78,11 @@ export class Env {
   @IsInt()
   PORT: number = 3000;
 
+  /** Proxies in front of the API (e.g. 1 on Render), so client IPs are read correctly */
+  @IsInt()
+  @Min(0)
+  TRUST_PROXY_HOPS: number = 0;
+
   /** Comma-separated list of allowed browser origins */
   @IsString()
   CORS_ORIGINS: string = '';
@@ -140,6 +146,15 @@ export function validateEnv(raw: Record<string, unknown>): Env {
   ) {
     throw new Error(
       'EMAIL_PROVIDER and SMS_PROVIDER must be real providers in production: "log" would print verification codes to the logs',
+    );
+  }
+  if (
+    env.MOMO_TARGET_ENVIRONMENT !== 'sandbox' &&
+    (env.MOMO_COLLECTION_CURRENCY !== 'RWF' ||
+      env.MOMO_DISBURSEMENT_CURRENCY !== 'RWF')
+  ) {
+    throw new Error(
+      'Live MoMo (MOMO_TARGET_ENVIRONMENT other than "sandbox") must use RWF for collections and disbursements',
     );
   }
   return env;

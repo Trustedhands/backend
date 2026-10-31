@@ -22,7 +22,7 @@ pnpm db:deploy        # apply migrations
 pnpm start:dev        # http://localhost:3000
 ```
 
-- API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from.
+- API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from. Both are off when `NODE_ENV=production`.
 - Health check: `GET /health`
 - All other routes are under `/v1` and need `Authorization: Bearer <access token>` (from `/v1/auth/login` or `/v1/auth/register`).
 
@@ -79,7 +79,7 @@ How it works:
 - **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
 - **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
 - **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
-- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, configure Express `trust proxy` so the limits apply to client IPs.
+- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, set `TRUST_PROXY_HOPS` (e.g. `1` on Render) so the limits apply to client IPs rather than the proxy's.
 - **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
 - **SMS** goes through Africa's Talking (`SMS_PROVIDER=africastalking`), using the sandbox when `AFRICAS_TALKING_USERNAME=sandbox`.
 - **`log` providers** print messages to the server log instead of sending them. They're handy locally, and the server refuses to start in production with either set to `log`.
@@ -156,7 +156,7 @@ The design rules behind this flow:
 - The price can't change while a charge is pending.
 - A network error on `requesttopay` leaves the payment `PENDING`, since MoMo may have accepted it. Only a definite 4xx rejection marks it `FAILED`.
 
-The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL` and `MOMO_COLLECTION_CURRENCY=RWF`. That also limits payers to MTN Rwanda numbers (078/079).
+The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL`, `MOMO_COLLECTION_CURRENCY=RWF` and `MOMO_DISBURSEMENT_CURRENCY=RWF` (the API refuses to start with a live environment and EUR). That also limits payers to MTN Rwanda numbers (078/079).
 
 MTN's failure codes (e.g. `NOT_ENOUGH_FUNDS`) are logged as-is and shown to the payer as plain-language messages.
 

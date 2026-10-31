@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import type { Env } from '../../../config/env.js';
@@ -32,6 +32,7 @@ import {
 import {
   clearRefreshCookie,
   readRefreshCookie,
+  sessionApp,
   setRefreshCookie,
 } from './refresh-cookie.js';
 
@@ -39,6 +40,12 @@ import {
 const STRICT = { default: { limit: 10, ttl: 60_000 } };
 
 @ApiTags('auth')
+@ApiQuery({
+  name: 'app',
+  required: false,
+  enum: ['client', 'admin'],
+  description: "Which app's refresh cookie to use (default client)",
+})
 @UseGuards(ThrottlerGuard)
 @Controller('auth')
 export class AuthController {
@@ -70,7 +77,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthSessionView> {
-    return this.respond(res, await this.auth.register(dto, userAgent(req)));
+    return this.respond(
+      req,
+      res,
+      await this.auth.register(dto, userAgent(req)),
+    );
   }
 
   @Public()
@@ -83,6 +94,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthSessionView> {
     return this.respond(
+      req,
       res,
       await this.auth.login(dto.email, dto.password, userAgent(req)),
     );
@@ -98,7 +110,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthSessionView> {
     this.assertTrustedOrigin(req);
-    const token = readRefreshCookie(req);
+    const token = readRefreshCookie(req, sessionApp(req));
     if (!token)
       throw new UnauthorizedError(
         'session_expired',
@@ -106,11 +118,12 @@ export class AuthController {
       );
     try {
       return this.respond(
+        req,
         res,
         await this.sessions.refresh(token, userAgent(req)),
       );
     } catch (error) {
-      clearRefreshCookie(res, { secure: this.secureCookies });
+      clearRefreshCookie(res, sessionApp(req), { secure: this.secureCookies });
       throw error;
     }
   }
@@ -123,9 +136,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     this.assertTrustedOrigin(req);
-    const token = readRefreshCookie(req);
+    const token = readRefreshCookie(req, sessionApp(req));
     if (token) await this.sessions.end(token);
-    clearRefreshCookie(res, { secure: this.secureCookies });
+    clearRefreshCookie(res, sessionApp(req), { secure: this.secureCookies });
   }
 
   /** Always 202, whether or not the email has an account. */
@@ -147,6 +160,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthSessionView> {
     return this.respond(
+      req,
       res,
       await this.auth.resetPassword(
         dto.email,
@@ -169,6 +183,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthSessionView> {
     return this.respond(
+      req,
       res,
       await this.auth.changePassword(
         user.id,
@@ -220,8 +235,14 @@ export class AuthController {
     await this.auth.verifyPhone(user.id, dto.code);
   }
 
-  private respond(res: Response, session: IssuedSession): AuthSessionView {
-    setRefreshCookie(res, session, { secure: this.secureCookies });
+  private respond(
+    req: Request,
+    res: Response,
+    session: IssuedSession,
+  ): AuthSessionView {
+    setRefreshCookie(res, sessionApp(req), session, {
+      secure: this.secureCookies,
+    });
     return { accessToken: session.accessToken, expiresIn: session.expiresIn };
   }
 

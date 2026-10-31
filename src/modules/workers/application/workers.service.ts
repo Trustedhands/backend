@@ -333,7 +333,7 @@ export class WorkersService {
     dto: VerifyWorkerDto,
   ): Promise<WorkerDetailView> {
     const worker = await this.find(id);
-    assertCanDecide(worker, actorId);
+    assertCanDecide(worker);
     assertAllChecksPass(dto.checks);
     // The profile may have been edited since it was submitted
     assertReadyForVerification(facts(worker));
@@ -373,7 +373,7 @@ export class WorkersService {
     reason: string,
   ): Promise<WorkerDetailView> {
     const worker = await this.find(id);
-    assertCanDecide(worker, actorId);
+    assertCanDecide(worker);
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.worker.updateMany({
         where: { id, status: 'PENDING_VERIFICATION' },

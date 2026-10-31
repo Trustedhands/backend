@@ -117,7 +117,8 @@ export class InvitationsController {
       dto,
       req.headers['user-agent'] ?? null,
     );
-    setRefreshCookie(res, session, { secure: this.secureCookies });
+    // Invitations are for the admin console
+    setRefreshCookie(res, 'admin', session, { secure: this.secureCookies });
     return { accessToken: session.accessToken, expiresIn: session.expiresIn };
   }
 }

@@ -75,6 +75,7 @@ How it works:
 
 - **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 15 minutes. They carry only the user id; the role is read from the database on each admin request, so revoking it takes effect immediately.
 - **Refresh tokens** are random, valid for 30 days, and stored only as SHA-256 hashes. They're set as an `httpOnly`, `SameSite=Lax` cookie scoped to `/v1/auth`, and are `Secure` in production. Every refresh rotates the token. Presenting an already-rotated token is treated as theft and revokes that whole session chain.
+- **One session per app:** pass `?app=admin` to `login`, `refresh` and `logout` from the admin console. Its refresh cookie is `th_refresh_admin`; the client app's is `th_refresh`. The two sessions are independent, so signing out of the console leaves the client app signed in, and the reverse.
 - **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
 - **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
 - **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
@@ -104,7 +105,7 @@ Bounded contexts:
 
 - **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
 - **identity**: client profile and home address.
-- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and **two-admin verification**. Whoever added a worker can't verify them, and every ID check must be ticked. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
+- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and verification by an admin with the `workers.verify` permission, who must tick every ID check. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
 - **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.

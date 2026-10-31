@@ -304,4 +304,45 @@ describe('Auth (e2e)', () => {
       .set('Cookie', user.cookie)
       .expect(401);
   });
+
+  it('keeps the client app and admin console sessions apart', async () => {
+    const user = await register();
+    const admin = await t
+      .http()
+      .post('/v1/auth/login?app=admin')
+      .send({ email: user.email, password: user.password })
+      .expect(200);
+    const adminCookie = (
+      admin.headers['set-cookie'] as unknown as string[]
+    ).find((c) => c.startsWith('th_refresh_admin='))!;
+    expect(adminCookie).toBeDefined();
+    const adminToken = adminCookie.split(';')[0]!;
+
+    // Each refresh reads only its own cookie
+    await t
+      .http()
+      .post('/v1/auth/refresh')
+      .set('Cookie', adminToken)
+      .expect(401);
+    await t
+      .http()
+      .post('/v1/auth/refresh?app=admin')
+      .set('Cookie', adminToken)
+      .expect(200);
+    await t
+      .http()
+      .post('/v1/auth/refresh')
+      .set('Cookie', user.cookie)
+      .expect(200);
+
+    // Logging out of one leaves the other alone
+    const out = await t
+      .http()
+      .post('/v1/auth/logout?app=admin')
+      .set('Cookie', adminToken)
+      .expect(204);
+    expect((out.headers['set-cookie'] as unknown as string[]).join()).toMatch(
+      /th_refresh_admin=;/,
+    );
+  });
 });

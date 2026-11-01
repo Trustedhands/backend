@@ -33,4 +33,9 @@ async function bootstrap() {
 
   await app.listen(config.get('PORT', { infer: true }));
 }
-await bootstrap();
+// Not a top-level await: hosts that load this module and then serve the app
+// themselves (Vercel) wait for the import to finish before handling requests
+bootstrap().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});

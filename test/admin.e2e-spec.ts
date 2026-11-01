@@ -19,8 +19,8 @@ const PNG = Buffer.from(
 );
 
 /**
- * The admin console's API against the real database. Suites run in parallel on
- * one database, so this one never changes settings other suites rely on.
+ * The admin console's API against the test database. Suites share it, so this
+ * one never changes settings other suites rely on.
  */
 describe('Admin console (e2e)', () => {
   let t: TestApp;

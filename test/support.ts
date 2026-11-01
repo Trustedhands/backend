@@ -16,6 +16,7 @@ import { MoneyTransferGateway } from '../src/modules/payments/application/money-
 import { PaymentRejectedError } from '../src/modules/payments/application/mobile-money.gateway.js';
 import { PrismaService } from '../src/shared/database/prisma.service.js';
 import { setupApp } from '../src/setup-app.js';
+import { assertLocalDatabase } from './test-env.js';
 
 /** Captures outgoing email so tests can read verification codes. */
 export class FakeMailer extends Mailer {
@@ -101,6 +102,7 @@ export interface TestApp {
 
 /** The real app against the database in .env, with outbound providers faked. */
 export async function createTestApp(): Promise<TestApp> {
+  assertLocalDatabase(process.env['DATABASE_URL'] ?? '');
   const mailer = new FakeMailer();
   const sms = new FakeSms();
   const momo = new FakeMomo();

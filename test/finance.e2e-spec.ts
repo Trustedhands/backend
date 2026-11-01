@@ -11,7 +11,7 @@ import {
 } from './support.js';
 
 /**
- * Escrow → release → refunds → payouts, against the real database, with MoMo
+ * Escrow → release → refunds → payouts, against the test database, with MoMo
  * faked. Ledger assertions are per request or per worker because other suites
  * share the database.
  */

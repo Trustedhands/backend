@@ -194,12 +194,18 @@ Callback bodies are never trusted; they only trigger a status check against MoMo
 ## Testing
 
 ```bash
-pnpm test       # unit tests (domain)
-pnpm test:e2e   # auth + full lifecycle against the database in .env; cleans up after itself
+pnpm test           # unit tests (domain)
+pnpm test:e2e       # full API against a throwaway Postgres in Docker (~10 s)
+pnpm test:db:down   # stop and discard that database
 pnpm lint && pnpm typecheck
 ```
 
-The e2e suites use real auth; only email, SMS and MoMo are faked (see `test/support.ts`).
+The e2e suites never touch the database in `.env`:
+
+- **Database:** `docker-compose.test.yml` runs Postgres 17 on `localhost:54329`, in memory. `pnpm test:e2e` starts it if it isn't running, then rebuilds it from the migrations (which also seed service types and settings), so every run starts clean. Docker must be running.
+- **Environment:** `test/test-env.ts` supplies everything the tests need (database URL, dummy secrets, log-only email and SMS, sandbox MoMo); nothing is read from `.env`.
+- **Guard:** the tests refuse to start if the database host isn't this machine. Point them elsewhere with `TEST_DATABASE_URL` only if it's another local Postgres.
+- **Fakes:** auth is real; email, SMS and MoMo are faked (see `test/support.ts`).
 
 ### Ticket attachments
 

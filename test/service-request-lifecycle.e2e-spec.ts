@@ -10,8 +10,8 @@ import {
 } from './support.js';
 
 /**
- * Runs the full client ↔ ops lifecycle against the real database configured
- * in .env, with real auth. Every row created here is removed afterwards.
+ * Runs the full client ↔ ops lifecycle against the test database, with real
+ * auth. Every row created here is removed afterwards.
  */
 describe('Service request lifecycle (e2e)', () => {
   let t: TestApp;

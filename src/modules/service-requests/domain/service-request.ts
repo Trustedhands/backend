@@ -63,6 +63,7 @@ const MAX_DESCRIPTION_LENGTH = 2000;
 const MIN_DURATION_HOURS = 0.5;
 const MAX_DURATION_HOURS = 12;
 const MAX_SALARY_RWF = 10_000_000;
+const MAX_ADVANCE_MS = 365 * 864e5;
 
 export type PlacementArrangement = 'LIVE_IN' | 'LIVE_OUT';
 
@@ -192,6 +193,12 @@ export class ServiceRequest {
         input.kind === 'PLACEMENT'
           ? 'Choose a start date in the future'
           : 'Choose a date and time in the future',
+      );
+    }
+    if (input.scheduledAt.getTime() > now.getTime() + MAX_ADVANCE_MS) {
+      throw new InvalidInputError(
+        'schedule_too_far',
+        'Choose a date within the next year',
       );
     }
 

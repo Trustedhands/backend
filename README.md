@@ -22,7 +22,7 @@ pnpm db:deploy        # apply migrations
 pnpm start:dev        # http://localhost:3000
 ```
 
-- API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from.
+- API docs: http://localhost:3000/docs. The OpenAPI JSON at `/docs/openapi.json` is what the frontends generate their typed client from. Both are off when `NODE_ENV=production`.
 - Health check: `GET /health`
 - All other routes are under `/v1` and need `Authorization: Bearer <access token>` (from `/v1/auth/login` or `/v1/auth/register`).
 
@@ -75,10 +75,11 @@ How it works:
 
 - **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 15 minutes. They carry only the user id; the role is read from the database on each admin request, so revoking it takes effect immediately.
 - **Refresh tokens** are random, valid for 30 days, and stored only as SHA-256 hashes. They're set as an `httpOnly`, `SameSite=Lax` cookie scoped to `/v1/auth`, and are `Secure` in production. Every refresh rotates the token. Presenting an already-rotated token is treated as theft and revokes that whole session chain.
+- **One session per app:** pass `?app=admin` to `login`, `refresh` and `logout` from the admin console. Its refresh cookie is `th_refresh_admin`; the client app's is `th_refresh`. The two sessions are independent, so signing out of the console leaves the client app signed in, and the reverse.
 - **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
 - **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
 - **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
-- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, configure Express `trust proxy` so the limits apply to client IPs.
+- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind proxies, set `TRUST_PROXY_HOPS` to how many sit in front of the API so the limits apply to client IPs: `1` on Render when the frontends call the API over the private network (or it's called directly), `2` when the frontends proxy to its public URL (their hop plus Render's load balancer).
 - **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
 - **SMS** goes through Africa's Talking (`SMS_PROVIDER=africastalking`), using the sandbox when `AFRICAS_TALKING_USERNAME=sandbox`.
 - **`log` providers** print messages to the server log instead of sending them. They're handy locally, and the server refuses to start in production with either set to `log`.
@@ -104,7 +105,7 @@ Bounded contexts:
 
 - **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
 - **identity**: client profile and home address.
-- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and **two-admin verification**. Whoever added a worker can't verify them, and every ID check must be ticked. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
+- **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and verification by an admin with the `workers.verify` permission, who must tick every ID check. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
 - **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
 - **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
@@ -155,7 +156,7 @@ The design rules behind this flow:
 - The price can't change while a charge is pending.
 - A network error on `requesttopay` leaves the payment `PENDING`, since MoMo may have accepted it. Only a definite 4xx rejection marks it `FAILED`.
 
-The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL` and `MOMO_COLLECTION_CURRENCY=RWF`. That also limits payers to MTN Rwanda numbers (078/079).
+The MoMo sandbox only accepts `EUR`. Any number succeeds there except MTN's test numbers: `46733123450` always fails and `46733123453` stays pending. For production, set `MOMO_TARGET_ENVIRONMENT`, `MOMO_BASE_URL`, `MOMO_COLLECTION_CURRENCY=RWF` and `MOMO_DISBURSEMENT_CURRENCY=RWF` (the API refuses to start with a live environment and EUR). That also limits payers to MTN Rwanda numbers (078/079).
 
 MTN's failure codes (e.g. `NOT_ENOUGH_FUNDS`) are logged as-is and shown to the payer as plain-language messages.
 
@@ -193,12 +194,18 @@ Callback bodies are never trusted; they only trigger a status check against MoMo
 ## Testing
 
 ```bash
-pnpm test       # unit tests (domain)
-pnpm test:e2e   # auth + full lifecycle against the database in .env; cleans up after itself
+pnpm test           # unit tests (domain)
+pnpm test:e2e       # full API against a throwaway Postgres in Docker (~10 s)
+pnpm test:db:down   # stop and discard that database
 pnpm lint && pnpm typecheck
 ```
 
-The e2e suites use real auth; only email, SMS and MoMo are faked (see `test/support.ts`).
+The e2e suites never touch the database in `.env`:
+
+- **Database:** `docker-compose.test.yml` runs Postgres 17 on `localhost:54329`, in memory. `pnpm test:e2e` starts it if it isn't running, then rebuilds it from the migrations (which also seed service types and settings), so every run starts clean. Docker must be running.
+- **Environment:** `test/test-env.ts` supplies everything the tests need (database URL, dummy secrets, log-only email and SMS, sandbox MoMo); nothing is read from `.env`.
+- **Guard:** the tests refuse to start if the database host isn't this machine. Point them elsewhere with `TEST_DATABASE_URL` only if it's another local Postgres.
+- **Fakes:** auth is real; email, SMS and MoMo are faked (see `test/support.ts`).
 
 ### Ticket attachments
 

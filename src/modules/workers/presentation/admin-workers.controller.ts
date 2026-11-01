@@ -133,7 +133,6 @@ export class AdminWorkersController {
     return this.workers.submitForVerification(user.id, id);
   }
 
-  /** Must be a different admin from the one who added the worker */
   @RequirePermission('workers.verify')
   @Post(':id/verify')
   verify(

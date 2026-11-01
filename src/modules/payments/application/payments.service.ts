@@ -81,6 +81,12 @@ export class PaymentsService {
           'This request has no price to pay yet',
         );
       }
+      // A price change or cancellation loaded before this point must now fail
+      // its version check instead of slipping in behind the charge
+      await tx.serviceRequest.update({
+        where: { id: serviceRequestId },
+        data: { version: { increment: 1 } },
+      });
       const payment = await this.payments.create(
         Payment.initiate({
           serviceRequestId,

@@ -16,6 +16,7 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
+import { serveUpload } from '../../../shared/files/file-type.js';
 import {
   CurrentUser,
   RequirePermission,
@@ -40,19 +41,6 @@ const uploads = FilesInterceptor('files', MAX_ATTACHMENTS, {
   storage: memoryStorage(),
   limits: { fileSize: MAX_ATTACHMENT_BYTES, files: MAX_ATTACHMENTS, fields: 5 },
 });
-
-/** Served inline but inert: no MIME sniffing, and any script in a file can't run. */
-function serveFile(file: {
-  filename: string;
-  contentType: string;
-  data: Buffer;
-}): StreamableFile {
-  return new StreamableFile(file.data, {
-    type: file.contentType,
-    length: file.data.length,
-    disposition: `inline; filename="${file.filename}"`,
-  });
-}
 
 @ApiTags('support')
 @ApiBearerAuth()
@@ -105,7 +93,7 @@ export class SupportController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
   ): Promise<StreamableFile> {
-    return serveFile(
+    return serveUpload(
       await this.support.attachment(id, attachmentId, {
         id: user.id,
         isAdmin: false,
@@ -182,7 +170,7 @@ export class AdminSupportController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
   ): Promise<StreamableFile> {
-    return serveFile(
+    return serveUpload(
       await this.support.attachment(id, attachmentId, {
         id: user.id,
         isAdmin: true,

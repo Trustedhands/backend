@@ -19,8 +19,8 @@ const PNG = Buffer.from(
 );
 
 /**
- * The admin console's API against the real database. Suites run in parallel on
- * one database, so this one never changes settings other suites rely on.
+ * The admin console's API against the test database. Suites share it, so this
+ * one never changes settings other suites rely on.
  */
 describe('Admin console (e2e)', () => {
   let t: TestApp;
@@ -195,7 +195,7 @@ describe('Admin console (e2e)', () => {
         })
         .expect(201);
       expect(accepted.headers['set-cookie']?.toString()).toContain(
-        'th_refresh=',
+        'th_refresh_admin=',
       );
       const me = await t
         .http()
@@ -456,13 +456,6 @@ describe('Admin console (e2e)', () => {
         photo: true,
         reference: true,
       };
-      await t
-        .http()
-        .post(`/v1/admin/workers/${id}/verify`)
-        .set(bearer(lead))
-        .send({ checks: allChecks })
-        .expect(403)
-        .expect((r) => expect(r.body.code).toBe('second_admin_required'));
       await t
         .http()
         .post(`/v1/admin/workers/${id}/verify`)

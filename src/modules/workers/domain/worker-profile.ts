@@ -1,6 +1,5 @@
 import {
   ConflictError,
-  ForbiddenError,
   InvalidInputError,
 } from '../../../shared/domain/domain-error.js';
 
@@ -111,20 +110,11 @@ export const VERIFICATION_CHECKS = [
 ] as const;
 export type VerificationCheck = (typeof VERIFICATION_CHECKS)[number];
 
-export function assertCanDecide(
-  worker: { status: WorkerStatus; createdById: string | null },
-  verifierId: string,
-): void {
+export function assertCanDecide(worker: { status: WorkerStatus }): void {
   if (worker.status !== 'PENDING_VERIFICATION') {
     throw new ConflictError(
       'not_pending',
       'Only workers pending verification can be verified or declined',
-    );
-  }
-  if (worker.createdById === verifierId) {
-    throw new ForbiddenError(
-      'second_admin_required',
-      'A different admin must verify the worker you added',
     );
   }
 }

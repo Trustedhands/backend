@@ -72,18 +72,13 @@ describe('worker profile rules', () => {
     );
   });
 
-  it('needs a second admin to decide', () => {
-    const pending = {
-      status: 'PENDING_VERIFICATION' as const,
-      createdById: 'admin-1',
-    };
-    expect(() => assertCanDecide(pending, 'admin-1')).toThrow(
-      expect.objectContaining({ code: 'second_admin_required' }),
-    );
-    expect(() => assertCanDecide(pending, 'admin-2')).not.toThrow();
+  it('only decides on workers pending verification', () => {
     expect(() =>
-      assertCanDecide({ ...pending, status: 'DRAFT' }, 'admin-2'),
-    ).toThrow(expect.objectContaining({ code: 'not_pending' }));
+      assertCanDecide({ status: 'PENDING_VERIFICATION' }),
+    ).not.toThrow();
+    expect(() => assertCanDecide({ status: 'DRAFT' })).toThrow(
+      expect.objectContaining({ code: 'not_pending' }),
+    );
   });
 
   it('needs every ID check ticked to verify', () => {

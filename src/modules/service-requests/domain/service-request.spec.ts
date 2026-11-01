@@ -61,6 +61,7 @@ describe('ServiceRequest', () => {
       [{ durationHours: 2.25 }, 'invalid_duration'],
       [{ durationHours: 13 }, 'invalid_duration'],
       [{ scheduledAt: new Date('2026-10-30T07:00:00Z') }, 'schedule_in_past'],
+      [{ scheduledAt: new Date('2027-12-01T07:00:00Z') }, 'schedule_too_far'],
     ])('rejects %o', (override, code) => {
       expect(() => ServiceRequest.submit(submission(override), NOW)).toThrow(
         expect.objectContaining({ code }),

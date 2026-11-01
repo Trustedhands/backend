@@ -1,0 +1,22 @@
+# Throwaway Postgres for the e2e tests. Never point tests at Supabase: it holds real data.
+#   pnpm test:db:up     start it (test:e2e also starts it if needed)
+#   pnpm test:db:down   stop and discard it
+services:
+  postgres-test:
+    image: postgres:17
+    container_name: trustedhands-test-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trustedhands_test
+    ports:
+      - '127.0.0.1:54329:5432'
+    # In memory: fast, and nothing survives a restart
+    tmpfs:
+      - /var/lib/postgresql/data
+    command: ['postgres', '-c', 'fsync=off', '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d trustedhands_test']
+      interval: 1s
+      timeout: 3s
+      retries: 30

@@ -561,4 +561,26 @@ describe('Finance (e2e)', () => {
       .expect(200);
     expect(forSupport.body.finance).toBeNull();
   });
+
+  it('runs settlement on demand only with the cron secret', async () => {
+    const path = '/v1/internal/settlement';
+    await t.http().get(path).expect(401);
+    await t.http().get(path).set(bearer(ops)).expect(401);
+    await t
+      .http()
+      .get(path)
+      .set('Authorization', 'Bearer not-the-cron-secret-at-all-0123456789')
+      .expect(401);
+    const run = await t
+      .http()
+      .get(path)
+      .set('Authorization', `Bearer ${process.env['CRON_SECRET']}`)
+      .expect(200);
+    expect(run.body).toEqual({
+      autoCompleted: expect.any(Number),
+      released: expect.any(Number),
+      paymentsChecked: expect.any(Number),
+      transfersChecked: expect.any(Number),
+    });
+  });
 });

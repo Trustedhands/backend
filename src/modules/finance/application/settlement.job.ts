@@ -26,7 +26,8 @@ export interface SettlementReport {
 }
 
 /**
- * Runs every minute:
+ * Runs every minute in-process, and on demand via GET /v1/internal/settlement
+ * (SettlementController) where the process doesn't stay up between requests:
  *  1. completes jobs whose release window passed without client confirmation
  *  2. releases escrow on completed jobs (worker share + platform fee), and on
  *     paid jobs cancelled longer ago than the release window (unrefunded

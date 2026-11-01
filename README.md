@@ -184,6 +184,11 @@ The **settlement job** runs every minute in each API instance (`src/modules/fina
 
 Every step is idempotent: rows are locked, and status updates are conditional on the current state, so overlapping runs and several instances are safe.
 
+On serverless hosts (Vercel) an instance only runs while it handles requests, so the timer can't be relied on. Set `CRON_SECRET` (32+ characters) and have a scheduler call `GET /v1/internal/settlement` with `Authorization: Bearer <CRON_SECRET>`; it runs one pass and returns what it did. Without `CRON_SECRET` the endpoint returns 404.
+
+- `vercel.json` registers a Vercel Cron job for it. Vercel sends the `CRON_SECRET` header itself. The Hobby plan only allows daily jobs, so the schedule is `0 3 * * *`; on Pro, change it to `* * * * *`.
+- On Hobby, use an external scheduler (for example cron-job.org) to call it every minute with the header as well.
+
 MoMo callbacks to register on the API user:
 
 - Collections: `MOMO_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/<paymentId>`)
@@ -209,7 +214,7 @@ The e2e suites never touch the database in `.env`:
 
 ### Ticket attachments
 
-Clients can attach up to 3 files of up to 5 MB each.
+Clients can attach up to 3 files, under 4 MB in total (Vercel functions reject request bodies over 4.5 MB).
 
 - **Allowed types:** JPG, PNG or PDF. The type is detected from the file's bytes, never from its name or the type the browser claims.
 - **Storage:** files are stored in Postgres (`ticket_attachments`). That's fine at MVP volumes. To move them to object storage, change only `SupportService.create` and `SupportService.attachment`.

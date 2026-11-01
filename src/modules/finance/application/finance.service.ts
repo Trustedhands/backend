@@ -69,8 +69,10 @@ export class FinanceService {
   // ─── Release ─────────────────────────────────────────────────────────────
 
   /**
-   * Splits a completed request's escrow between its worker and the platform.
-   * Idempotent: does nothing if already released or not completed.
+   * Settles a request's escrow. Completed: split between the worker and the
+   * platform. Cancelled: whatever wasn't refunded goes to the platform.
+   * Idempotent: does nothing if already released, still open, or while a
+   * refund is in flight (a failed one would return money to escrow).
    */
   async release(serviceRequestId: string): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
@@ -78,8 +80,21 @@ export class FinanceService {
       const request = await tx.serviceRequest.findUnique({
         where: { id: serviceRequestId },
       });
-      if (!request || request.status !== 'COMPLETED' || request.releasedAt)
+      if (
+        !request ||
+        request.releasedAt ||
+        (request.status !== 'COMPLETED' && request.status !== 'CANCELLED')
+      )
         return false;
+      const refundsInFlight = await tx.refund.count({
+        where: { payment: { serviceRequestId }, status: 'PENDING' },
+      });
+      if (refundsInFlight) return false;
+      // A cancelled job earns the worker nothing
+      const workerFeeRwf =
+        request.status === 'COMPLETED' && request.assignedWorkerId
+          ? (request.workerFeeRwf ?? 0)
+          : 0;
 
       const escrowRwf = await ledgerBalance(tx, {
         account: 'ESCROW',
@@ -95,9 +110,7 @@ export class FinanceService {
       });
       const { workerRwf, platformRwf } = splitEscrow({
         escrowRwf,
-        workerFeeRwf: request.assignedWorkerId
-          ? (request.workerFeeRwf ?? 0)
-          : 0,
+        workerFeeRwf,
         refundedRwf: refunded._sum.amountRwf ?? 0,
       });
       await postLedger(tx, [
@@ -560,6 +573,7 @@ export class FinanceService {
               workerFeeRwf: true,
               assignedWorkerId: true,
               releasedAt: true,
+              status: true,
               serviceType: { select: { label: true } },
             },
           },
@@ -598,7 +612,10 @@ export class FinanceService {
           p.refunds
             .filter((r) => r.chargedTo === 'ESCROW')
             .reduce((s, r) => s + r.amountRwf, 0),
-        workerFeeRwf: sr.assignedWorkerId ? (sr.workerFeeRwf ?? 0) : 0,
+        workerFeeRwf:
+          sr.status !== 'CANCELLED' && sr.assignedWorkerId
+            ? (sr.workerFeeRwf ?? 0)
+            : 0,
         refundedRwf: p.refunds
           .filter((r) => r.chargedTo === 'ESCROW')
           .reduce((s, r) => s + r.amountRwf, 0),
@@ -620,6 +637,7 @@ export class FinanceService {
           : planned.platformRwf,
         refundedRwf,
         status: settled ? 'SETTLED' : 'IN_ESCROW',
+        requestCancelled: sr.status === 'CANCELLED',
       };
     });
     return { items, total };
@@ -651,7 +669,8 @@ export class FinanceService {
         r.workerShareRwf,
         r.feeRwf,
         r.refundedRwf,
-        r.status === 'SETTLED' ? 'Settled' : 'In escrow',
+        (r.requestCancelled ? 'Cancelled · ' : '') +
+          (r.status === 'SETTLED' ? 'Settled' : 'In escrow'),
       ]
         .map(csvCell)
         .join(','),

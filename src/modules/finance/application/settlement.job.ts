@@ -28,7 +28,9 @@ export interface SettlementReport {
 /**
  * Runs every minute:
  *  1. completes jobs whose release window passed without client confirmation
- *  2. releases escrow on completed jobs (worker share + platform fee)
+ *  2. releases escrow on completed jobs (worker share + platform fee), and on
+ *     paid jobs cancelled longer ago than the release window (unrefunded
+ *     money goes to the platform)
  *  3. settles MoMo payments, refunds and payouts still pending
  * Every step is idempotent, so overlapping runs or several API instances are safe.
  */
@@ -129,7 +131,25 @@ export class SettlementJob
       orderBy: { completedAt: 'asc' },
       take: BATCH,
     });
-    for (const r of toRelease) {
+    // Cancelled after payment: what wasn't refunded within the window goes to the platform
+    const cancelled = await this.prisma.serviceRequest.findMany({
+      where: {
+        status: 'CANCELLED',
+        releasedAt: null,
+        payments: { some: { status: 'SUCCESSFUL' } },
+        events: {
+          some: {
+            status: 'CANCELLED',
+            createdAt: {
+              lt: new Date(now.getTime() - releaseAfterHours * 3_600_000),
+            },
+          },
+        },
+      },
+      select: { id: true },
+      take: BATCH,
+    });
+    for (const r of [...toRelease, ...cancelled]) {
       if (await this.finance.release(r.id)) report.released++;
     }
 

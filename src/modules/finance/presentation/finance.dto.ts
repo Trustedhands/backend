@@ -47,6 +47,8 @@ export class TransactionRowView {
   refundedRwf: number;
   @ApiProperty({ enum: ['IN_ESCROW', 'SETTLED'] })
   status: 'IN_ESCROW' | 'SETTLED';
+  /** Cancelled after payment: the worker gets nothing; unrefunded money goes to the platform */
+  requestCancelled: boolean;
 }
 
 export class TransactionPageView {

@@ -317,6 +317,62 @@ describe('Finance (e2e)', () => {
     expect(await escrowOf(id)).toBe(21_000);
   });
 
+  it('gives the platform what was not refunded on a cancelled paid job', async () => {
+    const { id, workerId } = await paidRequest();
+    await t
+      .http()
+      .post(`/v1/admin/service-requests/${id}/cancel`)
+      .set(bearer(ops))
+      .send({ reason: 'Client no longer needs it' })
+      .expect(200);
+    const refund = await t
+      .http()
+      .post('/v1/admin/finance/refunds')
+      .set(bearer(finance))
+      .send({ serviceRequestId: id, amountRwf: 15_000, reason: 'Cancelled' })
+      .expect(201);
+
+    // Only this request is moved back in time; the job itself runs at the real now
+    const cancelledLongAgo = () =>
+      t.prisma.serviceRequestEvent.updateMany({
+        where: { serviceRequestId: id, status: 'CANCELLED' },
+        data: { createdAt: new Date(Date.now() - 3 * 864e5) },
+      });
+
+    // Inside the release window: nothing moves
+    await job.runOnce();
+    expect(await escrowOf(id)).toBe(6_000);
+
+    // Past the window but with the refund still in flight: still nothing
+    await cancelledLongAgo();
+    await job.runOnce();
+    expect(await escrowOf(id)).toBe(6_000);
+
+    // Refund done: the remainder goes to the platform; the worker gets nothing
+    await completeTransfer('refunds', refund.body.id);
+    await job.runOnce();
+    expect(await escrowOf(id)).toBe(0);
+    expect(await platformOn(id)).toBe(6_000);
+    expect(await walletOf(workerId)).toBe(0);
+
+    const txs = await t
+      .http()
+      .get('/v1/admin/finance/transactions?pageSize=100')
+      .set(bearer(finance))
+      .expect(200);
+    expect(
+      txs.body.items.find(
+        (r: { serviceRequestId: string }) => r.serviceRequestId === id,
+      ),
+    ).toMatchObject({
+      workerShareRwf: 0,
+      feeRwf: 6_000,
+      refundedRwf: 15_000,
+      status: 'SETTLED',
+      requestCancelled: true,
+    });
+  });
+
   it('pays workers out by MoMo, never more than their wallet, and reverses failures', async () => {
     const { id, workerId } = await paidRequest();
     await t

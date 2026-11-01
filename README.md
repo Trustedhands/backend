@@ -79,7 +79,7 @@ How it works:
 - **CSRF:** `refresh` and `logout` reject requests from an `Origin` outside `CORS_ORIGINS`.
 - **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the account exists.
 - **Codes** are 6 digits and stored as HMACs. They expire after 10 minutes, allow 5 attempts, and can be resent after 60 seconds. Asking for a new code invalidates the previous one.
-- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind a proxy, set `TRUST_PROXY_HOPS` (e.g. `1` on Render) so the limits apply to client IPs rather than the proxy's.
+- **Rate limits:** auth endpoints allow 10 requests per minute per IP (30 for `refresh`). They're off when `NODE_ENV=test`. Behind proxies, set `TRUST_PROXY_HOPS` to how many sit in front of the API so the limits apply to client IPs: `1` on Render when the frontends call the API over the private network (or it's called directly), `2` when the frontends proxy to its public URL (their hop plus Render's load balancer).
 - **Email** goes through Resend (`EMAIL_PROVIDER=resend`). Mail comes from `TrustedHands <no-reply@EMAIL_DOMAIN>` unless `EMAIL_FROM` is set.
 - **SMS** goes through Africa's Talking (`SMS_PROVIDER=africastalking`), using the sandbox when `AFRICAS_TALKING_USERNAME=sandbox`.
 - **`log` providers** print messages to the server log instead of sending them. They're handy locally, and the server refuses to start in production with either set to `log`.

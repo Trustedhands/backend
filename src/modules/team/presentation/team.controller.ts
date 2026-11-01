@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import type { Env } from '../../../config/env.js';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
@@ -22,6 +21,7 @@ import {
   Public,
   RequirePermission,
 } from '../../../shared/auth/decorators.js';
+import { RateLimit, RateLimitGuard } from '../../../shared/http/rate-limit.js';
 import { AuthSessionView } from '../../auth/presentation/auth.dto.js';
 import { setRefreshCookie } from '../../auth/presentation/refresh-cookie.js';
 import { TeamService } from '../application/team.service.js';
@@ -84,7 +84,7 @@ export class AdminTeamController {
 
 /** The accept-invite page in the admin app. */
 @ApiTags('team invitations')
-@UseGuards(ThrottlerGuard)
+@UseGuards(RateLimitGuard)
 @Controller('team/invitations')
 export class InvitationsController {
   private readonly secureCookies: boolean;
@@ -98,7 +98,7 @@ export class InvitationsController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @RateLimit({ limit: 20, ttlMs: 60_000 })
   @Get(':token')
   preview(@Param('token') token: string): Promise<InvitationPreviewView> {
     return this.team.previewInvitation(token);
@@ -106,7 +106,7 @@ export class InvitationsController {
 
   /** Creates the staff account and signs in (sets the refresh cookie) */
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @RateLimit({ limit: 10, ttlMs: 60_000 })
   @Post('accept')
   async accept(
     @Body() dto: AcceptInvitationDto,

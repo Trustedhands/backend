@@ -10,11 +10,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import type { Env } from '../../../config/env.js';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
 import { CurrentUser, Public } from '../../../shared/auth/decorators.js';
+import { RateLimit, RateLimitGuard } from '../../../shared/http/rate-limit.js';
 import { UnauthorizedError } from '../../../shared/domain/domain-error.js';
 import { AuthService } from '../application/auth.service.js';
 import type { IssuedSession } from '../application/sessions.service.js';
@@ -37,7 +37,7 @@ import {
 } from './refresh-cookie.js';
 
 /** Tight per-IP limits on credential and code endpoints. */
-const STRICT = { default: { limit: 10, ttl: 60_000 } };
+const STRICT = { limit: 10, ttlMs: 60_000 };
 
 @ApiTags('auth')
 @ApiQuery({
@@ -46,7 +46,7 @@ const STRICT = { default: { limit: 10, ttl: 60_000 } };
   enum: ['client', 'admin'],
   description: "Which app's refresh cookie to use (default client)",
 })
-@UseGuards(ThrottlerGuard)
+@UseGuards(RateLimitGuard)
 @Controller('auth')
 export class AuthController {
   private readonly secureCookies: boolean;
@@ -70,7 +70,7 @@ export class AuthController {
 
   /** Creates the account and client profile, emails a verification code, and signs in. */
   @Public()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
@@ -85,7 +85,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('login')
   @HttpCode(200)
   async login(
@@ -102,7 +102,7 @@ export class AuthController {
 
   /** Exchanges the refresh cookie for a new access token (and rotates the cookie). */
   @Public()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @RateLimit({ limit: 30, ttlMs: 60_000 })
   @Post('refresh')
   @HttpCode(200)
   async refresh(
@@ -143,7 +143,7 @@ export class AuthController {
 
   /** Always 202, whether or not the email has an account. */
   @Public()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('password/forgot')
   @HttpCode(202)
   async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<void> {
@@ -151,7 +151,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('password/reset')
   @HttpCode(200)
   async resetPassword(
@@ -173,7 +173,7 @@ export class AuthController {
 
   /** Signs out other devices. */
   @ApiBearerAuth()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('password/change')
   @HttpCode(200)
   async changePassword(
@@ -195,7 +195,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('email/send-code')
   @HttpCode(204)
   async sendEmailCode(@CurrentUser() user: AuthUser): Promise<void> {
@@ -203,7 +203,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('email/verify')
   @HttpCode(204)
   async verifyEmail(
@@ -214,7 +214,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('phone/send-code')
   @HttpCode(204)
   async sendPhoneCode(
@@ -225,7 +225,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @Post('phone/verify')
   @HttpCode(204)
   async verifyPhone(

@@ -8,10 +8,15 @@ import {
   AdminFinanceController,
   DisbursementWebhookController,
 } from './presentation/finance.controller.js';
+import { SettlementController } from './presentation/settlement.controller.js';
 
 @Module({
   imports: [PaymentsModule, ServiceRequestsModule, ConfigurationModule],
-  controllers: [AdminFinanceController, DisbursementWebhookController],
+  controllers: [
+    AdminFinanceController,
+    DisbursementWebhookController,
+    SettlementController,
+  ],
   providers: [FinanceService, SettlementJob],
   exports: [FinanceService],
 })

@@ -1,6 +1,11 @@
 import { StreamableFile } from '@nestjs/common';
 
-export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+/**
+ * Whole requests must stay under the host's body limit (4.5 MB on Vercel
+ * functions), so one file, and all files sent together, stay under 4 MB.
+ */
+export const MAX_UPLOAD_MB = 4;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 const SIGNATURES: ReadonlyArray<{
   type: string;

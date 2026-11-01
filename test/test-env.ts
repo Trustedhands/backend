@@ -18,6 +18,7 @@ export const TEST_ENV: Record<string, string> = {
   MOMO_TARGET_ENVIRONMENT: 'sandbox',
   MOMO_COLLECTION_CURRENCY: 'EUR',
   MOMO_DISBURSEMENT_CURRENCY: 'EUR',
+  CRON_SECRET: 'e2e-cron-secret-not-used-anywhere-else-0123',
 };
 
 /** Tests wipe and rebuild their database, so only ever run them against this machine. */

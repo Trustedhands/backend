@@ -5,12 +5,14 @@ import {
 import {
   detectFileType,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_MB,
   safeFilename,
 } from '../../../shared/files/file-type.js';
 
 export type TicketStatus = 'OPEN' | 'ACTIVE' | 'CLOSED';
 
 export const MAX_ATTACHMENTS = 3;
+/** Per file and for all files in one report together */
 export const MAX_ATTACHMENT_BYTES = MAX_UPLOAD_BYTES;
 const MAX_DESCRIPTION = 4000;
 const SUBJECT_LENGTH = 60;
@@ -61,11 +63,11 @@ export function validateAttachments(files: UploadedFile[]): ValidAttachment[] {
       `Attach up to ${MAX_ATTACHMENTS} files`,
     );
   }
-  return files.map((f) => {
+  const valid = files.map((f) => {
     if (f.size === 0 || f.size > MAX_ATTACHMENT_BYTES) {
       throw new InvalidInputError(
         'file_too_large',
-        'Each file must be under 5 MB',
+        `Each file must be under ${MAX_UPLOAD_MB} MB`,
       );
     }
     const contentType = detectFileType(f.buffer);
@@ -81,6 +83,13 @@ export function validateAttachments(files: UploadedFile[]): ValidAttachment[] {
       data: f.buffer,
     };
   });
+  if (files.reduce((sum, f) => sum + f.size, 0) > MAX_ATTACHMENT_BYTES) {
+    throw new InvalidInputError(
+      'files_too_large',
+      `Attachments must add up to under ${MAX_UPLOAD_MB} MB`,
+    );
+  }
+  return valid;
 }
 
 /** Ops moves tickets OPEN → ACTIVE → CLOSED, and may reopen a closed one. */

@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { TicketStatus } from '../../../generated/prisma/enums.js';
 
-/** Multipart text fields; files go in `files` (up to 3 JPG/PNG/PDF, 5 MB each). */
+/** Multipart text fields; files go in `files` (up to 3 JPG/PNG/PDF, under 4 MB in total). */
 export class CreateTicketDto {
   @IsString()
   @MinLength(10)

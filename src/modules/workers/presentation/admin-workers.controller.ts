@@ -82,7 +82,7 @@ export class AdminWorkersController {
     return this.workers.update(user.id, id, dto);
   }
 
-  /** PHOTO (JPG/PNG), ID_FRONT or ID_BACK (JPG/PNG/PDF), up to 5 MB; replaces any previous one */
+  /** PHOTO (JPG/PNG), ID_FRONT or ID_BACK (JPG/PNG/PDF), under 4 MB; replaces any previous one */
   @RequirePermission('workers.manage')
   @Post(':id/documents/:kind')
   @UseInterceptors(

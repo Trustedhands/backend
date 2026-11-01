@@ -126,6 +126,15 @@ export class Env {
   @IsOptional()
   @IsString()
   MOMO_DSB_CALLBACK_URL?: string;
+
+  /**
+   * Bearer token for GET /v1/internal/settlement, for hosts where the
+   * in-process timer can't run (serverless). Unset disables the endpoint.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  CRON_SECRET?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Env {

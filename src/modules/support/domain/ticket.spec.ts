@@ -56,6 +56,10 @@ describe('ticket rules', () => {
     expect(() => validateAttachments([f, f, f, f])).toThrow(
       expect.objectContaining({ code: 'too_many_files' }),
     );
+    const half = { ...f, size: 2 * 1024 * 1024 + 1 };
+    expect(() => validateAttachments([half, half])).toThrow(
+      expect.objectContaining({ code: 'files_too_large' }),
+    );
   });
 
   it('allows reopening but not un-starting', () => {

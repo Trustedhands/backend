@@ -17,6 +17,7 @@ import {
 import {
   detectFileType,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_MB,
   safeFilename,
 } from '../../../shared/files/file-type.js';
 import { normalizeRwandaPhone } from '../../auth/domain/credentials.js';
@@ -235,7 +236,10 @@ export class WorkersService {
     if (!file)
       throw new InvalidInputError('file_required', 'Choose a file to upload');
     if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
-      throw new InvalidInputError('file_too_large', 'Files must be under 5 MB');
+      throw new InvalidInputError(
+        'file_too_large',
+        `Files must be under ${MAX_UPLOAD_MB} MB`,
+      );
     }
     const contentType = detectFileType(file.buffer);
     const allowed =

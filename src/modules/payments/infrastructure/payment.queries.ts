@@ -102,6 +102,7 @@ export class PaymentQueries {
         receiptReference:
           p.status === 'SUCCESSFUL' ? formatReceiptRef(p.receiptNumber) : null,
         amountRwf: p.amountRwf,
+        method: p.provider,
         status: p.status,
         at: p.completedAt ?? p.createdAt,
       })),
@@ -115,6 +116,10 @@ export class PaymentQueries {
         ),
         receiptReference: formatReceiptRef(r.payment.receiptNumber),
         amountRwf: r.amountRwf,
+        method:
+          r.destination === 'WALLET'
+            ? ('WALLET' as const)
+            : ('MTN_MOMO' as const),
         status:
           r.status === 'SUCCESSFUL'
             ? ('REFUNDED' as const)

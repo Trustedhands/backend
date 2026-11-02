@@ -51,7 +51,10 @@ export class TransactionView {
   receiptReference: string | null;
   /** Always positive; `kind` gives the direction */
   amountRwf: number;
-  /** Refunds go back to the payer's MoMo number: PENDING, then REFUNDED */
+  /** How it was paid, or where the refund went */
+  @ApiProperty({ enum: ['MTN_MOMO', 'WALLET'] })
+  method: 'MTN_MOMO' | 'WALLET';
+  /** MoMo refunds are PENDING, then REFUNDED; wallet refunds are REFUNDED at once */
   @ApiProperty({ enum: ['PENDING', 'SUCCESSFUL', 'FAILED', 'REFUNDED'] })
   status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'REFUNDED';
   at: Date;

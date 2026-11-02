@@ -89,6 +89,10 @@ export class ServiceTypeView {
   feeType: ServiceFeeType;
   visible: boolean;
   sortOrder: number;
+  /** The request form asks for home type, bedrooms and bathrooms */
+  asksHomeSize: boolean;
+  /** The request form asks which parts of the home to service */
+  asksAreas: boolean;
 }
 
 /** What the client app needs to offer a service. */
@@ -97,6 +101,8 @@ export class PublicServiceTypeView {
   label: string;
   @ApiProperty({ enum: ServiceFeeType })
   feeType: ServiceFeeType;
+  asksHomeSize: boolean;
+  asksAreas: boolean;
 }
 
 export class CreateServiceTypeDto {
@@ -129,6 +135,14 @@ export class CreateServiceTypeDto {
   @Min(0)
   @Max(10_000)
   sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  asksHomeSize?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  asksAreas?: boolean;
 }
 
 export class UpdateServiceTypeDto extends PartialType(CreateServiceTypeDto) {}

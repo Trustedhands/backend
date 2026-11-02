@@ -15,7 +15,8 @@ export interface AuditEntry {
     | 'team'
     | 'ticket'
     | 'payment'
-    | 'payout';
+    | 'payout'
+    | 'client';
   entityId: string;
   data?: Prisma.InputJsonValue;
 }

@@ -9,6 +9,7 @@ import type { Env } from '../../../config/env.js';
 import { PrismaService } from '../../../shared/database/prisma.service.js';
 import { ConfigurationService } from '../../configuration/application/configuration.service.js';
 import { PaymentsService } from '../../payments/application/payments.service.js';
+import { WalletService } from '../../payments/application/wallet.service.js';
 import { ServiceRequestRepository } from '../../service-requests/domain/service-request.repository.js';
 import { releaseDueAt } from '../domain/settlement.js';
 import { FinanceService } from './finance.service.js';
@@ -32,7 +33,7 @@ export interface SettlementReport {
  *  2. releases escrow on completed jobs (worker share + platform fee), and on
  *     paid jobs cancelled longer ago than the release window (unrefunded
  *     money goes to the platform)
- *  3. settles MoMo payments, refunds and payouts still pending
+ *  3. settles MoMo payments, wallet top-ups, refunds and payouts still pending
  * Every step is idempotent, so overlapping runs or several API instances are safe.
  */
 @Injectable()
@@ -47,6 +48,7 @@ export class SettlementJob
     private readonly prisma: PrismaService,
     private readonly finance: FinanceService,
     private readonly payments: PaymentsService,
+    private readonly wallet: WalletService,
     private readonly requests: ServiceRequestRepository,
     private readonly settings: ConfigurationService,
     private readonly config: ConfigService<Env, true>,
@@ -156,8 +158,13 @@ export class SettlementJob
 
     // 3. Pending MoMo operations
     const stale = new Date(now.getTime() - PENDING_MIN_AGE_MS);
-    const [payments, refunds, payouts] = await Promise.all([
+    const [payments, topUps, refunds, payouts] = await Promise.all([
       this.prisma.payment.findMany({
+        where: { status: 'PENDING', createdAt: { lt: stale } },
+        select: { id: true },
+        take: BATCH,
+      }),
+      this.prisma.walletTopUp.findMany({
         where: { status: 'PENDING', createdAt: { lt: stale } },
         select: { id: true },
         take: BATCH,
@@ -175,6 +182,10 @@ export class SettlementJob
     ]);
     for (const p of payments) {
       await this.payments.syncById(p.id);
+      report.paymentsChecked++;
+    }
+    for (const t of topUps) {
+      await this.wallet.syncById(t.id);
       report.paymentsChecked++;
     }
     for (const r of refunds) {

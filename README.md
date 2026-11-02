@@ -174,7 +174,7 @@ Money is tracked in an append-only ledger (`ledger_entries`). Each account's bal
 | A refund or payout fails | The held amount is reversed |
 
 - **Release** happens when the client marks the job done. If they don't, the job auto-completes once the visit has been over for **release window** hours (Settings, default 24).
-- **Refunds** go back to the payer's MoMo number through **MoMo Disbursement** (`POST /v1/admin/finance/refunds`).
+- **Refunds** go back the way the client paid: to the payer's MoMo number through **MoMo Disbursement**, or straight into the client wallet for wallet payments (`POST /v1/admin/finance/refunds`).
 - **Payouts** are started by finance staff. MoMo payouts go out immediately through Disbursement. Bank payouts are confirmed by hand with `mark-paid` or `mark-failed`.
 
 The **settlement job** runs every minute in each API instance (`src/modules/finance/application/settlement.job.ts`). It:
@@ -195,6 +195,25 @@ MoMo callbacks to register on the API user:
 - Disbursement: `MOMO_DSB_CALLBACK_URL` = `https://<api-host>/v1/webhooks/momo` (called as `/refunds/<id>` and `/payouts/<id>`)
 
 Callback bodies are never trusted; they only trigger a status check against MoMo. Without callbacks (e.g. locally), the settlement job settles everything within a minute or two.
+
+### Client wallet
+
+Clients can hold a balance and pay bookings from it. The balance is the sum of the client's `wallet_entries`, an append-only list:
+
+| Entry | Amount | From |
+|---|---|---|
+| `TOP_UP` | + | The client's own MoMo top-up (`POST /v1/wallet/top-ups`, then poll `GET /v1/wallet/top-ups/:id`) |
+| `ADJUSTMENT` | + | An ops credit with a reason, e.g. cash or a bank transfer received (`POST /v1/admin/clients/:id/wallet/credits`, needs `payments.manage`) |
+| `PAYMENT_DEBIT` | − | Paying a booking with `{ "method": "WALLET" }`; it settles at once and the money goes into escrow like a MoMo payment |
+| `REFUND_CREDIT` | + | A refund of a wallet payment |
+
+- **Settings → Client wallet** switches top-ups and wallet payments on or off (off by default). Ops credits work either way, and clients always see their balance.
+- Top-ups and credits are 500–1,000,000 RWF each. Top-ups share `MOMO_CALLBACK_URL` with payments, and the settlement job settles any nobody polled.
+- Debits lock the client's profile row, so two payments can't spend the same balance.
+
+### Household details
+
+Each service type has two switches in the admin **Services** page: `asksHomeSize` (home type, bedrooms, bathrooms) and `asksAreas` (which parts of the home to service). The client request form shows only what the chosen service asks for, and the API requires those fields and drops any others (`household` on `POST /v1/service-requests`). By default cleaning and house help ask for both, laundry asks for the home size and repairs for the areas.
 
 ## Testing
 

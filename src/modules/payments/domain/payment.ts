@@ -2,14 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { ConflictError } from '../../../shared/domain/domain-error.js';
 
 export type PaymentStatus = 'PENDING' | 'SUCCESSFUL' | 'FAILED';
+export type PaymentMethod = 'MTN_MOMO' | 'WALLET';
 
 export interface PaymentProps {
   id: string;
   receiptNumber: number | null;
   serviceRequestId: string;
   clientId: string;
+  method: PaymentMethod;
   amountRwf: number;
   status: PaymentStatus;
+  /** MoMo payments only; empty for wallet payments */
   msisdn: string;
   /** X-Reference-Id used with MoMo requesttopay */
   providerReference: string;
@@ -19,7 +22,7 @@ export interface PaymentProps {
   createdAt: Date;
 }
 
-/** A single MoMo charge for a priced service request. */
+/** A single charge for a priced service request, by MoMo or from the client's wallet. */
 export class Payment {
   private constructor(private props: PaymentProps) {}
 
@@ -28,7 +31,8 @@ export class Payment {
       serviceRequestId: string;
       clientId: string;
       amountRwf: number;
-      msisdn: string;
+      /** Omit to pay from the wallet */
+      msisdn?: string;
     },
     now = new Date(),
   ): Payment {
@@ -36,6 +40,8 @@ export class Payment {
       id: randomUUID(),
       receiptNumber: null,
       ...input,
+      method: input.msisdn ? 'MTN_MOMO' : 'WALLET',
+      msisdn: input.msisdn ?? '',
       status: 'PENDING',
       providerReference: randomUUID(),
       providerTransactionId: null,
@@ -60,6 +66,9 @@ export class Payment {
   }
   get clientId() {
     return this.props.clientId;
+  }
+  get method() {
+    return this.props.method;
   }
   get amountRwf() {
     return this.props.amountRwf;

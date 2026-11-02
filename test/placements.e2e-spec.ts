@@ -1,5 +1,6 @@
 import { SettlementJob } from '../src/modules/finance/application/settlement.job.js';
 import {
+  HOME,
   bearer,
   createTestApp,
   createVerifiedWorker,
@@ -48,6 +49,7 @@ describe('Placements (e2e)', () => {
         description: 'Live-out house help for a family of four',
         preferredLanguages: ['EN'],
         address,
+        household: HOME,
         ...body,
       });
   const worker = async (name: string) => {

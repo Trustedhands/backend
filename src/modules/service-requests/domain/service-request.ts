@@ -37,6 +37,24 @@ export type GenderPreference =
 export const Language = { EN: 'EN', FR: 'FR', RW: 'RW', SW: 'SW' } as const;
 export type Language = (typeof Language)[keyof typeof Language];
 
+export const HOME_TYPES = ['APARTMENT', 'HOUSE', 'VILLA'] as const;
+export type HomeType = (typeof HOME_TYPES)[number];
+
+export const HOME_AREAS = [
+  'KITCHEN',
+  'LIVING_ROOM',
+  'DINING',
+  'BEDROOMS',
+  'BATHROOMS',
+  'WINDOWS',
+  'LAUNDRY_AREA',
+  'COMPOUND',
+  'GARDEN',
+] as const;
+export type HomeArea = (typeof HOME_AREAS)[number];
+
+const MAX_ROOMS = 20;
+
 /** Statuses a client sees under "Active" in My requests. */
 export const ACTIVE_STATUSES: readonly ServiceRequestStatus[] = [
   'REQUESTED',
@@ -76,6 +94,22 @@ export interface PlacementTerms {
   salaryRwf: number | null;
 }
 
+/** The home being serviced, for services that ask (see ServiceType.asksHomeSize/asksAreas). */
+export interface HouseholdDetails {
+  homeType: HomeType | null;
+  /** 0 for a studio */
+  bedrooms: number | null;
+  bathrooms: number | null;
+  /** Parts of the home to service; empty when not asked */
+  areas: HomeArea[];
+}
+
+/** What the request's service asks the client about their home. */
+export interface HouseholdQuestions {
+  homeSize: boolean;
+  areas: boolean;
+}
+
 export interface ServiceAddress {
   district: string;
   sector: string;
@@ -105,6 +139,7 @@ export interface ServiceRequestProps {
   durationHours: number | null;
   /** Placements only */
   placement: PlacementTerms | null;
+  household: HouseholdDetails;
   preferredGender: GenderPreference;
   preferredLanguages: Language[];
   address: ServiceAddress;
@@ -131,6 +166,8 @@ export interface SubmitServiceRequest {
   durationHours?: number | null;
   /** Required for placements */
   placement?: PlacementTerms | null;
+  /** Required where the service asks; ignored where it doesn't */
+  household?: Partial<HouseholdDetails> | null;
   preferredGender: GenderPreference;
   preferredLanguages: Language[];
   address: ServiceAddress;
@@ -157,7 +194,11 @@ export class ServiceRequest {
 
   private constructor(private props: ServiceRequestProps) {}
 
-  static submit(input: SubmitServiceRequest, now = new Date()): ServiceRequest {
+  static submit(
+    input: SubmitServiceRequest,
+    now = new Date(),
+    asks: HouseholdQuestions = { homeSize: false, areas: false },
+  ): ServiceRequest {
     const description = input.description.trim();
     if (!description) {
       throw new InvalidInputError('description_required', 'Describe the job');
@@ -187,6 +228,7 @@ export class ServiceRequest {
     } else {
       placement = validatePlacement(input.placement);
     }
+    const household = validateHousehold(input.household, asks);
     if (input.scheduledAt.getTime() <= now.getTime()) {
       throw new InvalidInputError(
         'schedule_in_past',
@@ -212,6 +254,7 @@ export class ServiceRequest {
       scheduledAt: input.scheduledAt,
       durationHours,
       placement,
+      household,
       preferredGender: input.preferredGender,
       preferredLanguages: [...new Set(input.preferredLanguages)],
       address: input.address,
@@ -479,6 +522,52 @@ export class ServiceRequest {
   ) {
     this.changes.push({ status, actorId, note, at });
   }
+}
+
+function validateHousehold(
+  h: Partial<HouseholdDetails> | null | undefined,
+  asks: HouseholdQuestions,
+): HouseholdDetails {
+  const result: HouseholdDetails = {
+    homeType: null,
+    bedrooms: null,
+    bathrooms: null,
+    areas: [],
+  };
+  if (asks.homeSize) {
+    if (!h?.homeType || !HOME_TYPES.includes(h.homeType)) {
+      throw new InvalidInputError(
+        'home_type_required',
+        'Choose the type of home',
+      );
+    }
+    const rooms = (n: unknown, min: number) =>
+      Number.isInteger(n) && (n as number) >= min && (n as number) <= MAX_ROOMS;
+    if (!rooms(h.bedrooms, 0) || !rooms(h.bathrooms, 1)) {
+      throw new InvalidInputError(
+        'invalid_home_size',
+        `Enter 0–${MAX_ROOMS} bedrooms and 1–${MAX_ROOMS} bathrooms`,
+      );
+    }
+    result.homeType = h.homeType;
+    result.bedrooms = h.bedrooms!;
+    result.bathrooms = h.bathrooms!;
+  }
+  if (asks.areas) {
+    const areas = [...new Set(h?.areas ?? [])];
+    if (!areas.length) {
+      throw new InvalidInputError(
+        'areas_required',
+        'Choose at least one part of the home',
+      );
+    }
+    if (areas.some((a) => !HOME_AREAS.includes(a))) {
+      throw new InvalidInputError('invalid_area', 'Unknown part of the home');
+    }
+    // Stored in a fixed order so every view lists them the same way
+    result.areas = HOME_AREAS.filter((a) => areas.includes(a));
+  }
+  return result;
 }
 
 function validatePlacement(

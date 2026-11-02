@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '../../../generated/prisma/client.js';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../../config/env.js';
 import {
@@ -18,6 +19,7 @@ import {
   MobileMoneyGateway,
   PaymentRejectedError,
 } from './mobile-money.gateway.js';
+import { lockWallet, walletBalance } from './wallet.service.js';
 
 /** How long MoMo may report "no such request" before we treat the payment as failed. */
 const NOT_FOUND_GRACE_MS = 5 * 60_000;
@@ -40,6 +42,67 @@ export class PaymentsService {
     private readonly config: ConfigService<Env, true>,
     private readonly settings: ConfigurationService,
   ) {}
+
+  /** "Accept & pay" from the client's wallet: settles at once, no MoMo prompt. */
+  async payFromWallet(
+    clientId: string,
+    serviceRequestId: string,
+  ): Promise<Payment> {
+    if (!(await this.settings.settings()).clientWalletEnabled) {
+      throw new UnavailableError(
+        'wallet_disabled',
+        "Paying from your wallet isn't available right now",
+      );
+    }
+    const id = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`select 1 from app.service_requests where id = ${serviceRequestId}::uuid for update`;
+      const request = await this.requests.findById(serviceRequestId, tx);
+      if (!request || !request.isOwnedBy(clientId)) {
+        throw new NotFoundError(
+          'service_request_not_found',
+          'Request not found',
+        );
+      }
+      if (await this.payments.findPendingForRequest(serviceRequestId, tx)) {
+        throw new ConflictError(
+          'payment_in_progress',
+          'A Mobile Money payment for this request is waiting on your phone',
+        );
+      }
+      if (request.status !== 'PRICED' || request.totalRwf === null) {
+        throw new ConflictError(
+          'not_payable',
+          'This request has no price to pay yet',
+        );
+      }
+      await lockWallet(tx, clientId);
+      if ((await walletBalance(tx, clientId)) < request.totalRwf) {
+        throw new ConflictError(
+          'insufficient_wallet',
+          'Your wallet balance is too low. Top up or pay with Mobile Money.',
+        );
+      }
+      const payment = await this.payments.create(
+        Payment.initiate({
+          serviceRequestId,
+          clientId,
+          amountRwf: request.totalRwf,
+        }),
+        tx,
+      );
+      await tx.walletEntry.create({
+        data: {
+          profileId: clientId,
+          type: 'PAYMENT_DEBIT',
+          amountRwf: -payment.amountRwf,
+          paymentId: payment.id,
+        },
+      });
+      await this.recordSuccess(tx, payment, null);
+      return payment.id;
+    });
+    return (await this.payments.findById(id))!;
+  }
 
   /** "Accept & pay": charges the request's current price via MoMo. */
   async initiate(
@@ -194,55 +257,64 @@ export class PaymentsService {
     payment: Payment,
     transactionId: string | null,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      payment.succeed(transactionId);
-      // Someone else (callback vs. poll) already settled it
-      if (!(await this.payments.settle(payment, tx))) return;
-      // The money now sits in escrow until the job is released
-      await postLedger(tx, [
-        {
-          account: 'ESCROW',
-          kind: 'PAYMENT_RECEIVED',
-          amountRwf: payment.amountRwf,
-          paymentId: payment.id,
-          serviceRequestId: payment.serviceRequestId,
-        },
-      ]);
+    await this.prisma.$transaction((tx) =>
+      this.recordSuccess(tx, payment, transactionId),
+    );
+  }
 
-      const request = await this.requests.findById(
-        payment.serviceRequestId,
-        tx,
+  /** Marks the payment successful, moves the money into escrow and the request to PAID. */
+  private async recordSuccess(
+    tx: Prisma.TransactionClient,
+    payment: Payment,
+    transactionId: string | null,
+  ): Promise<void> {
+    payment.succeed(transactionId);
+    // Someone else (callback vs. poll) already settled it
+    if (!(await this.payments.settle(payment, tx))) return;
+    // The money now sits in escrow until the job is released
+    await postLedger(tx, [
+      {
+        account: 'ESCROW',
+        kind: 'PAYMENT_RECEIVED',
+        amountRwf: payment.amountRwf,
+        paymentId: payment.id,
+        serviceRequestId: payment.serviceRequestId,
+      },
+    ]);
+
+    const request = await this.requests.findById(payment.serviceRequestId, tx);
+    try {
+      request!.markPaid(payment.amountRwf);
+      await this.requests.save(request!, tx);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      // A wallet payment can still be rolled back, so undo the debit instead
+      if (!code || !UNAPPLIABLE_CODES.has(code) || payment.method === 'WALLET')
+        throw error;
+      // Money has moved, so keep the payment; ops must refund or fix the request
+      this.logger.error(
+        `Payment ${payment.id} succeeded but request ${payment.serviceRequestId} could not be marked paid ` +
+          `(${code}). Needs manual review.`,
       );
-      try {
-        request!.markPaid(payment.amountRwf);
-        await this.requests.save(request!, tx);
-      } catch (error) {
-        const code = (error as { code?: string }).code;
-        if (!code || !UNAPPLIABLE_CODES.has(code)) throw error;
-        // Money has moved, so keep the payment; ops must refund or fix the request
-        this.logger.error(
-          `Payment ${payment.id} succeeded but request ${payment.serviceRequestId} could not be marked paid ` +
-            `(${code}). Needs manual review.`,
-        );
-      }
+    }
 
-      const hasDefault = await tx.savedPaymentMethod.count({
-        where: { profileId: payment.clientId, isDefault: true },
-      });
-      await tx.savedPaymentMethod.upsert({
-        where: {
-          profileId_msisdn: {
-            profileId: payment.clientId,
-            msisdn: payment.msisdn,
-          },
-        },
-        create: {
+    if (payment.method !== 'MTN_MOMO') return;
+    const hasDefault = await tx.savedPaymentMethod.count({
+      where: { profileId: payment.clientId, isDefault: true },
+    });
+    await tx.savedPaymentMethod.upsert({
+      where: {
+        profileId_msisdn: {
           profileId: payment.clientId,
           msisdn: payment.msisdn,
-          isDefault: hasDefault === 0,
         },
-        update: {},
-      });
+      },
+      create: {
+        profileId: payment.clientId,
+        msisdn: payment.msisdn,
+        isDefault: hasDefault === 0,
+      },
+      update: {},
     });
   }
 }

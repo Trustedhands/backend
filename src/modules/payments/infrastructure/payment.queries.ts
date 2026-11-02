@@ -35,7 +35,8 @@ export class PaymentQueries {
       serviceRequestId: s.serviceRequestId,
       amountRwf: s.amountRwf,
       status: s.status,
-      msisdnMasked: maskMsisdn(s.msisdn),
+      method: s.method,
+      msisdnMasked: s.method === 'MTN_MOMO' ? maskMsisdn(s.msisdn) : null,
       failureReason: s.failureReason,
       createdAt: s.createdAt,
       completedAt: s.completedAt,
@@ -101,6 +102,7 @@ export class PaymentQueries {
         receiptReference:
           p.status === 'SUCCESSFUL' ? formatReceiptRef(p.receiptNumber) : null,
         amountRwf: p.amountRwf,
+        method: p.provider,
         status: p.status,
         at: p.completedAt ?? p.createdAt,
       })),
@@ -114,6 +116,10 @@ export class PaymentQueries {
         ),
         receiptReference: formatReceiptRef(r.payment.receiptNumber),
         amountRwf: r.amountRwf,
+        method:
+          r.destination === 'WALLET'
+            ? ('WALLET' as const)
+            : ('MTN_MOMO' as const),
         status:
           r.status === 'SUCCESSFUL'
             ? ('REFUNDED' as const)

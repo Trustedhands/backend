@@ -48,6 +48,14 @@ export class FakeSms extends SmsSender {
   }
 }
 
+/** Household details for services that ask for them (cleaning, house help…). */
+export const HOME = {
+  homeType: 'APARTMENT',
+  bedrooms: 2,
+  bathrooms: 1,
+  areas: ['KITCHEN', 'LIVING_ROOM'],
+};
+
 /** Stands in for MTN MoMo; tests decide when a charge succeeds. */
 export class FakeMomo extends MobileMoneyGateway {
   readonly statuses = new Map<string, ProviderPaymentStatus>();
@@ -258,6 +266,12 @@ export async function deleteUsers(
       select: { id: true },
     })
   ).map((r) => r.id);
+  await prisma.walletEntry.deleteMany({
+    where: { profileId: { in: userIds } },
+  });
+  await prisma.walletTopUp.deleteMany({
+    where: { profileId: { in: userIds } },
+  });
   await prisma.ledgerEntry.deleteMany({
     where: {
       OR: [

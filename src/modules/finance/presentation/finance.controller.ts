@@ -77,7 +77,7 @@ export class AdminFinanceController {
     return this.finance.refunds();
   }
 
-  /** "Issue refund": back to the payer's MoMo number */
+  /** "Issue refund": back the way it was paid (MoMo number or wallet) */
   @RequirePermission('payments.manage')
   @Post('refunds')
   refund(

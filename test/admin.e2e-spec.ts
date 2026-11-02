@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  HOME,
   bearer,
   createTestApp,
   createVerifiedWorker,
@@ -88,6 +89,7 @@ describe('Admin console (e2e)', () => {
           'Guest house, 6 rooms. Change linen and clean common areas.',
         scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString(),
         durationHours: 4,
+        household: HOME,
         preferredGender: 'FEMALE',
         preferredLanguages: ['FR'],
         address: {

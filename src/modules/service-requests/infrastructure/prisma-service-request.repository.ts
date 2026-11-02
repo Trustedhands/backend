@@ -40,6 +40,10 @@ export class PrismaServiceRequestRepository extends ServiceRequestRepository {
         placementArrangement: s.placement?.arrangement ?? null,
         placementDaysPerWeek: s.placement?.daysPerWeek ?? null,
         placementSalaryRwf: s.placement?.salaryRwf ?? null,
+        homeType: s.household.homeType,
+        bedrooms: s.household.bedrooms,
+        bathrooms: s.household.bathrooms,
+        areas: s.household.areas,
         preferredGender: s.preferredGender,
         preferredLanguages: s.preferredLanguages,
         addressDistrict: s.address.district,
@@ -139,6 +143,12 @@ function toDomain(row: ServiceRequestRow): ServiceRequest {
             salaryRwf: row.placementSalaryRwf,
           }
         : null,
+    household: {
+      homeType: row.homeType,
+      bedrooms: row.bedrooms,
+      bathrooms: row.bathrooms,
+      areas: row.areas,
+    },
     preferredGender: row.preferredGender,
     preferredLanguages: row.preferredLanguages,
     address: {

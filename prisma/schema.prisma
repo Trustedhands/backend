@@ -187,6 +187,7 @@ model Profile {
   serviceRequests ServiceRequest[]
   payments        Payment[]
   walletEntries   WalletEntry[]
+  walletTopUps    WalletTopUp[]
   reviews         Review[]
   tickets         SupportTicket[]
   assignedTickets SupportTicket[]      @relation("TicketAssignee")
@@ -371,6 +372,10 @@ model ServiceType {
   feeType      ServiceFeeType @default(SERVICE)
   visible      Boolean        @default(true)
   sortOrder    Int            @default(0)
+  /// The request form asks for home type, bedrooms and bathrooms
+  asksHomeSize Boolean        @default(false)
+  /// The request form asks which parts of the home to service
+  asksAreas    Boolean        @default(false)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -477,6 +482,28 @@ enum GenderPreference {
   @@schema("app")
 }
 
+enum HomeType {
+  APARTMENT
+  HOUSE
+  VILLA
+
+  @@schema("app")
+}
+
+enum HomeArea {
+  KITCHEN
+  LIVING_ROOM
+  DINING
+  BEDROOMS
+  BATHROOMS
+  WINDOWS
+  LAUNDRY_AREA
+  COMPOUND
+  GARDEN
+
+  @@schema("app")
+}
+
 model ServiceRequest {
   id                   String                @id @default(uuid()) @db.Uuid
   /// Human-readable sequence, shown as SR-<number>
@@ -497,6 +524,11 @@ model ServiceRequest {
   placementSalaryRwf   Int?
   preferredGender      GenderPreference      @default(ANY)
   preferredLanguages   Language[]
+  /// Household details, for services that ask for them
+  homeType             HomeType?
+  bedrooms             Int?                  @db.SmallInt
+  bathrooms            Int?                  @db.SmallInt
+  areas                HomeArea[]            @default([])
 
   // Address snapshot, so later edits to the client's address don't rewrite history
   addressDistrict  String
@@ -596,6 +628,7 @@ model Payment {
   client         Profile        @relation(fields: [clientId], references: [id])
   refunds        Refund[]
   ledgerEntries  LedgerEntry[]
+  walletEntry    WalletEntry?
 
   @@index([clientId, createdAt])
   @@index([serviceRequestId])
@@ -605,26 +638,35 @@ model Payment {
 
 /// Refunds are credited to the client's wallet.
 /// Money sent back to the payer's MoMo number (Disbursement transfer).
+enum RefundDestination {
+  MOMO
+  WALLET
+
+  @@schema("app")
+}
+
 model Refund {
-  id                    String        @id @default(uuid()) @db.Uuid
-  paymentId             String        @db.Uuid
+  id                    String            @id @default(uuid()) @db.Uuid
+  paymentId             String            @db.Uuid
   amountRwf             Int
   reason                String
-  issuedById            String        @db.Uuid
+  issuedById            String            @db.Uuid
   /// The ticket it resolves, if any
-  ticketId              String?       @db.Uuid
-  status                PaymentStatus @default(PENDING)
-  /// E.164-less MSISDN the money is sent to (the payer's number)
-  msisdn                String
+  ticketId              String?           @db.Uuid
+  status                PaymentStatus     @default(PENDING)
+  /// Back the way it was paid: the payer's MoMo number, or their wallet
+  destination           RefundDestination @default(MOMO)
+  /// E.164-less MSISDN the money is sent to (MoMo refunds only)
+  msisdn                String?
   /// ESCROW before the worker share is released; PLATFORM after
   chargedTo             LedgerAccount
-  /// X-Reference-Id sent to MoMo Disbursement
-  providerReference     String        @unique @db.Uuid
+  /// X-Reference-Id sent to MoMo Disbursement (MoMo refunds only)
+  providerReference     String?           @unique @db.Uuid
   providerTransactionId String?
   failureReason         String?
   completedAt           DateTime?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   payment       Payment       @relation(fields: [paymentId], references: [id])
   walletEntry   WalletEntry?
@@ -639,27 +681,60 @@ model Refund {
 enum WalletEntryType {
   REFUND_CREDIT
   PAYMENT_DEBIT
+  /// Ops credit (cash or bank received, goodwill); always positive
   ADJUSTMENT
+  /// Client's own MoMo top-up
+  TOP_UP
 
   @@schema("app")
 }
 
 /// Append-only ledger; a client's balance is the sum of their amountRwf.
 model WalletEntry {
-  id        String          @id @default(uuid()) @db.Uuid
-  profileId String          @db.Uuid
-  type      WalletEntryType
+  id          String          @id @default(uuid()) @db.Uuid
+  profileId   String          @db.Uuid
+  type        WalletEntryType
   /// Positive for credits, negative for debits
-  amountRwf Int
-  refundId  String?         @unique @db.Uuid
-  note      String?
-  createdAt DateTime        @default(now())
+  amountRwf   Int
+  refundId    String?         @unique @db.Uuid
+  paymentId   String?         @unique @db.Uuid
+  topUpId     String?         @unique @db.Uuid
+  /// Staff member who made an ADJUSTMENT
+  createdById String?         @db.Uuid
+  note        String?
+  createdAt   DateTime        @default(now())
 
-  profile Profile @relation(fields: [profileId], references: [id])
-  refund  Refund? @relation(fields: [refundId], references: [id])
+  profile Profile      @relation(fields: [profileId], references: [id])
+  refund  Refund?      @relation(fields: [refundId], references: [id])
+  payment Payment?     @relation(fields: [paymentId], references: [id])
+  topUp   WalletTopUp? @relation(fields: [topUpId], references: [id])
 
   @@index([profileId, createdAt])
   @@map("wallet_entries")
+  @@schema("app")
+}
+
+/// A client adding money to their wallet with MoMo.
+model WalletTopUp {
+  id                    String        @id @default(uuid()) @db.Uuid
+  profileId             String        @db.Uuid
+  amountRwf             Int
+  status                PaymentStatus @default(PENDING)
+  msisdn                String
+  /// X-Reference-Id sent to MoMo requesttopay
+  providerReference     String        @unique @db.Uuid
+  providerTransactionId String?
+  failureReason         String?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  profile     Profile      @relation(fields: [profileId], references: [id])
+  walletEntry WalletEntry?
+
+  @@index([profileId, createdAt])
+  @@index([status])
+  @@map("wallet_top_ups")
   @@schema("app")
 }
 

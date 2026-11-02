@@ -12,6 +12,7 @@ import { ApiBearerAuth, ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../../../shared/auth/auth-user.js';
 import { CurrentUser, Public } from '../../../shared/auth/decorators.js';
 import { PaymentsService } from '../application/payments.service.js';
+import { WalletService } from '../application/wallet.service.js';
 import { PaymentQueries } from '../infrastructure/payment.queries.js';
 import {
   InitiatePaymentDto,
@@ -29,8 +30,9 @@ export class PaymentsController {
   ) {}
 
   /**
-   * "Accept & pay". Sends a MoMo prompt to the payer's phone; poll
-   * GET /payments/:id until the status leaves PENDING.
+   * "Accept & pay". MoMo sends a prompt to the payer's phone; poll
+   * GET /payments/:id until the status leaves PENDING. Wallet payments
+   * come back SUCCESSFUL straight away.
    */
   @Post('service-requests/:id/payments')
   async initiate(
@@ -39,7 +41,9 @@ export class PaymentsController {
     @Body() dto: InitiatePaymentDto,
   ): Promise<PaymentView> {
     return this.queries.view(
-      await this.payments.initiate(user.id, serviceRequestId, dto.msisdn),
+      dto.method === 'WALLET'
+        ? await this.payments.payFromWallet(user.id, serviceRequestId)
+        : await this.payments.initiate(user.id, serviceRequestId, dto.msisdn!),
     );
   }
 
@@ -58,10 +62,16 @@ export class PaymentsController {
   }
 }
 
-/** MoMo calls back here (X-Callback-Url = MOMO_CALLBACK_URL/<paymentId>). */
+/**
+ * MoMo calls back here (X-Callback-Url = MOMO_CALLBACK_URL/<id>), for
+ * booking payments and wallet top-ups alike.
+ */
 @Controller('webhooks/momo')
 export class MomoWebhookController {
-  constructor(private readonly payments: PaymentsService) {}
+  constructor(
+    private readonly payments: PaymentsService,
+    private readonly wallet: WalletService,
+  ) {}
 
   @Public()
   @ApiExcludeEndpoint()
@@ -71,6 +81,7 @@ export class MomoWebhookController {
     @Param('paymentId', ParseUUIDPipe) paymentId: string,
   ): Promise<void> {
     await this.payments.handleProviderCallback(paymentId);
+    await this.wallet.handleProviderCallback(paymentId);
   }
 
   @Public()
@@ -81,5 +92,6 @@ export class MomoWebhookController {
     @Param('paymentId', ParseUUIDPipe) paymentId: string,
   ): Promise<void> {
     await this.payments.handleProviderCallback(paymentId);
+    await this.wallet.handleProviderCallback(paymentId);
   }
 }

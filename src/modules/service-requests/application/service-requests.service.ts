@@ -48,7 +48,10 @@ export class ServiceRequestsService {
           ? 'VISIT'
           : (input.kind ?? 'VISIT');
     const created = await this.requests.create(
-      ServiceRequest.submit({ ...input, kind }),
+      ServiceRequest.submit({ ...input, kind }, new Date(), {
+        homeSize: service.asksHomeSize,
+        areas: service.asksAreas,
+      }),
     );
     return { id: created.id };
   }

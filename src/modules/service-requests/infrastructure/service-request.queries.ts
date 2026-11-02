@@ -48,6 +48,7 @@ const detailInclude = {
     select: {
       id: true,
       receiptNumber: true,
+      provider: true,
       amountRwf: true,
       status: true,
       completedAt: true,
@@ -311,6 +312,15 @@ export class ServiceRequestQueries {
         latitude: row.addressLatitude,
         longitude: row.addressLongitude,
       },
+      household:
+        row.homeType || row.areas.length
+          ? {
+              homeType: row.homeType,
+              bedrooms: row.bedrooms,
+              bathrooms: row.bathrooms,
+              areas: row.areas,
+            }
+          : null,
       quote:
         total !== null && row.pricedAt
           ? {
@@ -334,6 +344,7 @@ export class ServiceRequestQueries {
         ? {
             id: paid.id,
             receiptReference: formatReceiptRef(paid.receiptNumber),
+            method: paid.provider,
             amountRwf: paid.amountRwf,
             completedAt: paid.completedAt,
           }

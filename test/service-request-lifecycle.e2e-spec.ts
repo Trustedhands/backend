@@ -50,6 +50,12 @@ describe('Service request lifecycle (e2e)', () => {
       description: '3-bedroom house, full clean incl. kitchen and 2 bathrooms.',
       scheduledAt: tomorrow.toISOString(),
       durationHours: 4,
+      household: {
+        homeType: 'HOUSE',
+        bedrooms: 3,
+        bathrooms: 2,
+        areas: ['BATHROOMS', 'KITCHEN', 'BEDROOMS'],
+      },
       preferredGender: 'FEMALE',
       preferredLanguages: ['EN', 'FR'],
       address: {
@@ -85,7 +91,23 @@ describe('Service request lifecycle (e2e)', () => {
       status: 'REQUESTED',
       totalRwf: null,
       quote: null,
+      // Stored in a fixed order
+      household: {
+        homeType: 'HOUSE',
+        bedrooms: 3,
+        bathrooms: 2,
+        areas: ['KITCHEN', 'BEDROOMS', 'BATHROOMS'],
+      },
     });
+
+    // Cleaning asks about the home, so it can't be left out
+    const { household: _omitted, ...withoutHome } = newRequest;
+    await http()
+      .post('/v1/service-requests')
+      .set(as(client))
+      .send(withoutHome)
+      .expect(422)
+      .expect((res) => expect(res.body.code).toBe('home_type_required'));
     expect(created.body.reference).toMatch(/^SR-\d+$/);
 
     // Clients can't use admin endpoints; unknown fields are rejected

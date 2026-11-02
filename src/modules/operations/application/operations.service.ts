@@ -213,7 +213,11 @@ export class OperationsService {
       }),
       this.prisma.profile.count({ where }),
     ]);
-    return { items: rows.map(toClientItem), total };
+    const balances = await this.walletBalances(rows.map((r) => r.id));
+    return {
+      items: rows.map((r) => toClientItem(r, balances.get(r.id) ?? 0)),
+      total,
+    };
   }
 
   async client(id: string): Promise<ClientDetailView> {
@@ -237,14 +241,24 @@ export class OperationsService {
       }),
     ]);
     const home = row.addresses[0];
+    const balances = await this.walletBalances([id]);
     return {
-      ...toClientItem(row),
+      ...toClientItem(row, balances.get(id) ?? 0),
       district: home?.district ?? null,
       sector: home?.sector ?? null,
       street: home?.street ?? null,
       recentRequests: await this.requests.listByIds(recent.map((r) => r.id)),
       openTicketCount,
     };
+  }
+
+  private async walletBalances(ids: string[]): Promise<Map<string, number>> {
+    const rows = await this.prisma.walletEntry.groupBy({
+      by: ['profileId'],
+      where: { profileId: { in: ids } },
+      _sum: { amountRwf: true },
+    });
+    return new Map(rows.map((r) => [r.profileId, r._sum.amountRwf ?? 0]));
   }
 
   private async names(ids: Array<string | null>): Promise<Map<string, string>> {
@@ -258,7 +272,10 @@ export class OperationsService {
   }
 }
 
-function toClientItem(row: ClientRow): ClientListItemView {
+function toClientItem(
+  row: ClientRow,
+  walletBalanceRwf: number,
+): ClientListItemView {
   return {
     id: row.id,
     fullName: row.fullName,
@@ -270,6 +287,7 @@ function toClientItem(row: ClientRow): ClientListItemView {
     emailVerified: row.user.emailVerifiedAt !== null,
     phoneVerified: row.user.phoneVerifiedAt !== null,
     requestCount: row._count.serviceRequests,
+    walletBalanceRwf,
     createdAt: row.createdAt,
   };
 }

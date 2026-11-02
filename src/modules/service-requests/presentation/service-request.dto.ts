@@ -20,9 +20,42 @@ import {
 import { AddressDto } from '../../../shared/http/address.dto.js';
 import {
   GenderPreference,
+  HOME_AREAS,
+  HOME_TYPES,
+  type HomeArea,
+  type HomeType,
   Language,
   ServiceRequestStatus,
 } from '../domain/service-request.js';
+
+/** Only for services with asksHomeSize / asksAreas (GET /v1/service-types). */
+export class HouseholdDto {
+  @ApiProperty({ enum: HOME_TYPES, required: false })
+  @IsOptional()
+  @IsIn(HOME_TYPES)
+  homeType?: HomeType;
+
+  /** 0 for a studio */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(20)
+  bedrooms?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  bathrooms?: number;
+
+  /** Parts of the home to service */
+  @ApiProperty({ enum: HOME_AREAS, isArray: true, required: false })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(HOME_AREAS, { each: true })
+  areas?: HomeArea[];
+}
 
 export class PlacementTermsDto {
   @ApiProperty({ enum: ['LIVE_IN', 'LIVE_OUT'] })
@@ -74,6 +107,12 @@ export class CreateServiceRequestDto {
   @ValidateNested()
   @Type(() => PlacementTermsDto)
   placement?: PlacementTermsDto;
+
+  /** The home to service, where the service asks for it */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HouseholdDto)
+  household?: HouseholdDto;
 
   @ApiProperty({ enum: GenderPreference, default: GenderPreference.ANY })
   @IsOptional()

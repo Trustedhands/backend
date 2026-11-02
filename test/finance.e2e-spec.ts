@@ -1,5 +1,6 @@
 import { SettlementJob } from '../src/modules/finance/application/settlement.job.js';
 import {
+  HOME,
   bearer,
   createTestApp,
   createVerifiedWorker,
@@ -88,6 +89,7 @@ describe('Finance (e2e)', () => {
         description: 'Deep clean',
         scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(),
         durationHours: 4,
+        household: HOME,
         preferredLanguages: [],
         address: { district: 'Gasabo', sector: 'Kacyiru', street: 'KG 9 Ave' },
       })

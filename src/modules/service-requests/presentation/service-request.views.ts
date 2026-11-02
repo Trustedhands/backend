@@ -2,6 +2,10 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ReviewView } from '../../reviews/presentation/review.dto.js';
 import {
   GenderPreference,
+  HOME_AREAS,
+  HOME_TYPES,
+  type HomeArea,
+  type HomeType,
   Language,
   ServiceRequestStatus,
 } from '../domain/service-request.js';
@@ -45,6 +49,8 @@ export class PaymentBriefView {
   id: string;
   /** e.g. RC-10482 */
   receiptReference: string;
+  @ApiProperty({ enum: ['MTN_MOMO', 'WALLET'] })
+  method: 'MTN_MOMO' | 'WALLET';
   amountRwf: number;
   completedAt: Date | null;
 }
@@ -55,6 +61,15 @@ export class PlacementTermsView {
   daysPerWeek: number;
   /** Monthly salary the client has in mind; agreed between them and the worker */
   salaryRwf: number | null;
+}
+
+export class HouseholdView {
+  @ApiProperty({ enum: HOME_TYPES, nullable: true })
+  homeType: HomeType | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  @ApiProperty({ enum: HOME_AREAS, isArray: true })
+  areas: HomeArea[];
 }
 
 export class ServiceRequestSummaryView {
@@ -88,6 +103,8 @@ export class ServiceRequestDetailView extends ServiceRequestSummaryView {
   @ApiProperty({ enum: Language, isArray: true })
   preferredLanguages: Language[];
   address: ServiceAddressView;
+  /** Null when the service didn't ask about the home */
+  household: HouseholdView | null;
   quote: QuoteView | null;
   adjustmentNote: string | null;
   cancellationReason: string | null;

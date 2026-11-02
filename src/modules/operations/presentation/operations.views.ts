@@ -103,6 +103,7 @@ export class ClientListItemView {
   emailVerified: boolean;
   phoneVerified: boolean;
   requestCount: number;
+  walletBalanceRwf: number;
   createdAt: Date;
 }
 

@@ -85,7 +85,13 @@ export class ConfigurationService {
     const rows = await this.prisma.serviceType.findMany({
       where: { visible: true },
       orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
-      select: { key: true, label: true, feeType: true },
+      select: {
+        key: true,
+        label: true,
+        feeType: true,
+        asksHomeSize: true,
+        asksAreas: true,
+      },
     });
     return rows;
   }
@@ -186,6 +192,8 @@ function toServiceTypeView(t: ServiceType): ServiceTypeView {
     feeType: t.feeType,
     visible: t.visible,
     sortOrder: t.sortOrder,
+    asksHomeSize: t.asksHomeSize,
+    asksAreas: t.asksAreas,
   };
 }
 

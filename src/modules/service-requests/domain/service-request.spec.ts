@@ -43,6 +43,75 @@ const priced = () => {
 };
 
 describe('ServiceRequest', () => {
+  describe('household details', () => {
+    const both = { homeSize: true, areas: true };
+    const home = {
+      homeType: 'APARTMENT' as const,
+      bedrooms: 0,
+      bathrooms: 1,
+      areas: ['WINDOWS' as const, 'KITCHEN' as const, 'KITCHEN' as const],
+    };
+
+    it('keeps them, areas deduplicated in a fixed order, when the service asks', () => {
+      const request = ServiceRequest.submit(
+        submission({ household: home }),
+        NOW,
+        both,
+      );
+      expect(request.toSnapshot().household).toEqual({
+        homeType: 'APARTMENT',
+        bedrooms: 0,
+        bathrooms: 1,
+        areas: ['KITCHEN', 'WINDOWS'],
+      });
+    });
+
+    it('drops them when the service does not ask', () => {
+      const request = ServiceRequest.submit(
+        submission({ household: home }),
+        NOW,
+      );
+      expect(request.toSnapshot().household).toEqual({
+        homeType: null,
+        bedrooms: null,
+        bathrooms: null,
+        areas: [],
+      });
+    });
+
+    it.each([
+      [{ ...home, homeType: undefined }, 'home_type_required'],
+      [{ ...home, bathrooms: 0 }, 'invalid_home_size'],
+      [{ ...home, bedrooms: 21 }, 'invalid_home_size'],
+      [{ ...home, bedrooms: 1.5 }, 'invalid_home_size'],
+      [{ ...home, areas: [] }, 'areas_required'],
+    ])('rejects %o', (household, code) => {
+      expect(() =>
+        ServiceRequest.submit(submission({ household }), NOW, both),
+      ).toThrow(expect.objectContaining({ code }));
+    });
+
+    it('asks only for what the service needs', () => {
+      const sizeOnly = ServiceRequest.submit(
+        submission({ household: { ...home, areas: [] } }),
+        NOW,
+        { homeSize: true, areas: false },
+      );
+      expect(sizeOnly.toSnapshot().household.areas).toEqual([]);
+      const areasOnly = ServiceRequest.submit(
+        submission({ household: { areas: ['GARDEN'] } }),
+        NOW,
+        { homeSize: false, areas: true },
+      );
+      expect(areasOnly.toSnapshot().household).toEqual({
+        homeType: null,
+        bedrooms: null,
+        bathrooms: null,
+        areas: ['GARDEN'],
+      });
+    });
+  });
+
   describe('submit', () => {
     it('starts as REQUESTED and records the submission', () => {
       const request = ServiceRequest.submit(submission(), NOW);

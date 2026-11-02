@@ -166,8 +166,11 @@ export class RefundView {
   status: PaymentStatus;
   @ApiProperty({ enum: ['ESCROW', 'PLATFORM'] })
   chargedTo: 'ESCROW' | 'PLATFORM';
-  /** e.g. 078 *** 4567 */
-  msisdnMasked: string;
+  /** Back the way it was paid */
+  @ApiProperty({ enum: ['MOMO', 'WALLET'] })
+  destination: 'MOMO' | 'WALLET';
+  /** e.g. 078 *** 4567; null for wallet refunds */
+  msisdnMasked: string | null;
   failureReason: string | null;
   ticketId: string | null;
   issuedByName: string;

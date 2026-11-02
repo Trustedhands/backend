@@ -154,7 +154,10 @@ export class FinanceService {
 
   // ─── Refunds ─────────────────────────────────────────────────────────────
 
-  /** "Issue refund": sends money back to the payer's MoMo number. */
+  /**
+   * "Issue refund": back the way it was paid. MoMo payments are sent to the
+   * payer's number; wallet payments are credited to the wallet at once.
+   */
   async issueRefund(
     actorId: string,
     input: {
@@ -183,7 +186,9 @@ export class FinanceService {
           'not_paid',
           'This request has no successful payment to refund',
         );
-      if (!payment.msisdn)
+      const destination =
+        payment.provider === 'WALLET' ? ('WALLET' as const) : ('MOMO' as const);
+      if (destination === 'MOMO' && !payment.msisdn)
         throw new ConflictError(
           'no_payer_number',
           'The payer’s MoMo number is unknown',
@@ -214,11 +219,26 @@ export class FinanceService {
           reason: input.reason.trim(),
           issuedById: actorId,
           ticketId: input.ticketId ?? null,
-          msisdn: payment.msisdn,
           chargedTo,
-          providerReference: randomUUID(),
+          ...(destination === 'MOMO'
+            ? { msisdn: payment.msisdn, providerReference: randomUUID() }
+            : {
+                destination,
+                status: 'SUCCESSFUL' as const,
+                completedAt: new Date(),
+              }),
         },
       });
+      if (destination === 'WALLET') {
+        await tx.walletEntry.create({
+          data: {
+            profileId: payment.clientId,
+            type: 'REFUND_CREDIT',
+            amountRwf: input.amountRwf,
+            refundId: created.id,
+          },
+        });
+      }
       // Reserve the money now so it can't be released or refunded twice
       await postLedger(tx, [
         {
@@ -243,11 +263,13 @@ export class FinanceService {
       return { ...created, reference: formatRequestRef(request.number) };
     });
 
-    await this.sendTransfer(
-      refund,
-      'refunds',
-      `TrustedHands refund ${refund.reference}`,
-    );
+    if (refund.destination === 'MOMO') {
+      await this.sendTransfer(
+        { ...refund, msisdn: refund.msisdn! },
+        'refunds',
+        `TrustedHands refund ${refund.reference}`,
+      );
+    }
     return this.refundView(refund.id);
   }
 
@@ -873,7 +895,8 @@ export class FinanceService {
       reason: r.reason,
       status: r.status,
       chargedTo: r.chargedTo as 'ESCROW' | 'PLATFORM',
-      msisdnMasked: maskMsisdn(r.msisdn),
+      destination: r.destination,
+      msisdnMasked: r.msisdn ? maskMsisdn(r.msisdn) : null,
       failureReason: r.failureReason,
       ticketId: r.ticketId,
       issuedByName: issuer?.fullName ?? 'Former staff',

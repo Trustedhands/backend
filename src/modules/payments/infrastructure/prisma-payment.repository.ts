@@ -36,11 +36,12 @@ export class PrismaPaymentRepository extends PaymentRepository {
         id: s.id,
         serviceRequestId: s.serviceRequestId,
         clientId: s.clientId,
-        provider: 'MTN_MOMO',
+        provider: s.method,
         amountRwf: s.amountRwf,
         status: s.status,
-        msisdn: s.msisdn,
-        providerReference: s.providerReference,
+        ...(s.method === 'MTN_MOMO'
+          ? { msisdn: s.msisdn, providerReference: s.providerReference }
+          : {}),
         createdAt: s.createdAt,
       },
     });
@@ -68,6 +69,7 @@ function toDomain(row: PaymentRow): Payment {
     receiptNumber: row.receiptNumber,
     serviceRequestId: row.serviceRequestId,
     clientId: row.clientId,
+    method: row.provider,
     amountRwf: row.amountRwf,
     status: row.status,
     msisdn: row.msisdn ?? '',

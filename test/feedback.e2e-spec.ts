@@ -1,4 +1,5 @@
 import {
+  HOME,
   bearer,
   createTestApp,
   createVerifiedWorker,
@@ -58,6 +59,7 @@ describe('Reviews and support (e2e)', () => {
         description: 'Full clean',
         scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(),
         durationHours: 3,
+        household: HOME,
         preferredLanguages: [],
         address: { district: 'Gasabo', sector: 'Kacyiru', street: 'KG 9 Ave' },
       })

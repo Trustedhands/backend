@@ -9,15 +9,11 @@ import {
 } from 'class-validator';
 
 export class InitiatePaymentDto {
-  /** WALLET pays from the client's wallet balance at once */
-  @ApiProperty({
-    enum: ['MTN_MOMO', 'WALLET'],
-    default: 'MTN_MOMO',
-    required: false,
-  })
+  /** MTN_MOMO when left out; WALLET pays from the client's wallet balance at once */
+  @ApiProperty({ enum: ['MTN_MOMO', 'WALLET'], required: false })
   @IsOptional()
   @IsIn(['MTN_MOMO', 'WALLET'])
-  method: 'MTN_MOMO' | 'WALLET' = 'MTN_MOMO';
+  method?: 'MTN_MOMO' | 'WALLET';
 
   /** MTN Mobile Money number, e.g. 078 123 4567; required unless paying from the wallet */
   @ValidateIf((dto: InitiatePaymentDto) => dto.method !== 'WALLET')

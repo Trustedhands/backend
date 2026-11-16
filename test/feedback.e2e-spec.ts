@@ -137,6 +137,15 @@ describe('Reviews and support (e2e)', () => {
         completedJobs: 1,
       });
 
+      // Ops sees the job under "Completed", newest first, with the rating
+      const done = await t
+        .http()
+        .get('/v1/admin/service-requests?status=COMPLETED')
+        .set(bearer(admin))
+        .expect(200);
+      expect(done.body.items[0]).toMatchObject({ id, rating: 5 });
+      expect(done.body.items[0].completedAt).toEqual(expect.any(String));
+
       await t
         .http()
         .post(`/v1/service-requests/${id}/review`)

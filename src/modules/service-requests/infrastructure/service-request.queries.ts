@@ -75,13 +75,21 @@ const clientSelect = {
 } satisfies Prisma.ProfileSelect;
 
 type ClientRow = Prisma.ProfileGetPayload<{ select: typeof clientSelect }>;
+const adminSummaryInclude = {
+  ...summaryInclude,
+  client: { select: clientSelect },
+  review: { select: { rating: true } },
+} satisfies Prisma.ServiceRequestInclude;
+
 type SummaryRow = Prisma.ServiceRequestGetPayload<{
   include: typeof summaryInclude;
 }>;
 type DetailRow = Prisma.ServiceRequestGetPayload<{
   include: typeof detailInclude;
 }>;
-type AdminSummaryRow = SummaryRow & { client: ClientRow };
+type AdminSummaryRow = Prisma.ServiceRequestGetPayload<{
+  include: typeof adminSummaryInclude;
+}>;
 type Audience = 'client' | 'admin';
 
 const PIPELINE: ReadonlyArray<{
@@ -94,6 +102,19 @@ const PIPELINE: ReadonlyArray<{
   { key: 'SCHEDULED', statuses: ['ASSIGNED'] },
   { key: 'IN_PROGRESS', statuses: ['IN_PROGRESS'] },
 ];
+
+/** Open work oldest first (the ops queue works through requests in order received); finished work newest first. */
+function adminListOrder(
+  status?: ServiceRequestStatus,
+): Prisma.ServiceRequestOrderByWithRelationInput[] {
+  if (status === 'COMPLETED')
+    return [
+      { completedAt: { sort: 'desc', nulls: 'last' } },
+      { updatedAt: 'desc' },
+    ];
+  if (status === 'CANCELLED') return [{ updatedAt: 'desc' }];
+  return [{ createdAt: 'asc' }];
+}
 
 /** Read side for service requests: shapes rows into the views the apps render. */
 @Injectable()
@@ -144,9 +165,8 @@ export class ServiceRequestQueries {
     const [rows, total] = await Promise.all([
       this.prisma.serviceRequest.findMany({
         where,
-        // Oldest first: the ops queue works through requests in order received
-        orderBy: { createdAt: 'asc' },
-        include: { ...summaryInclude, client: { select: clientSelect } },
+        orderBy: adminListOrder(filter.status),
+        include: adminSummaryInclude,
         skip: filter.skip,
         take: filter.take,
       }),
@@ -179,7 +199,7 @@ export class ServiceRequestQueries {
           this.prisma.serviceRequest.findMany({
             where,
             orderBy: { scheduledAt: 'asc' },
-            include: { ...summaryInclude, client: { select: clientSelect } },
+            include: adminSummaryInclude,
             take: 50,
           }),
           this.prisma.serviceRequest.count({ where }),
@@ -201,7 +221,7 @@ export class ServiceRequestQueries {
         status: { in: ['REQUESTED', 'ADJUSTMENT_REQUESTED', 'PAID', 'PRICED'] },
       },
       orderBy: { scheduledAt: 'asc' },
-      include: { ...summaryInclude, client: { select: clientSelect } },
+      include: adminSummaryInclude,
       take,
     });
     return this.toAdminSummaries(rows);
@@ -211,7 +231,7 @@ export class ServiceRequestQueries {
     const rows = await this.prisma.serviceRequest.findMany({
       where: { id: { in: ids } },
       orderBy: { scheduledAt: 'desc' },
-      include: { ...summaryInclude, client: { select: clientSelect } },
+      include: adminSummaryInclude,
     });
     return this.toAdminSummaries(rows);
   }
@@ -240,6 +260,8 @@ export class ServiceRequestQueries {
       ...s,
       client: toContact(rows[i]!.client),
       remindedAt: rows[i]!.remindedAt,
+      completedAt: rows[i]!.completedAt,
+      rating: rows[i]!.review?.rating ?? null,
     }));
   }
 

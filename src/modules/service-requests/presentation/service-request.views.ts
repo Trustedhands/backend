@@ -133,6 +133,9 @@ export class AdminServiceRequestSummaryView extends ServiceRequestSummaryView {
   client: ClientContactView;
   /** When the client was last reminded to pay */
   remindedAt: Date | null;
+  completedAt: Date | null;
+  /** The client's star rating (1–5), once they've reviewed the job */
+  rating: number | null;
 }
 
 export class AdminServiceRequestDetailView extends ServiceRequestDetailView {

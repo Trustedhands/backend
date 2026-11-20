@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../../config/env.js';
 import {
   ConflictError,
   InvalidInputError,
@@ -16,7 +18,10 @@ import {
   type SubmitServiceRequest,
 } from '../domain/service-request.js';
 import { ServiceRequestRepository } from '../domain/service-request.repository.js';
-import { paymentReminderEmail } from './request-emails.js';
+import {
+  newRequestStaffEmail,
+  paymentReminderEmail,
+} from './request-emails.js';
 
 type Actor = { id: string; isAdmin: boolean };
 
@@ -33,6 +38,7 @@ export class ServiceRequestsService {
     private readonly prisma: PrismaService,
     private readonly mailer: Mailer,
     private readonly sms: SmsSender,
+    private readonly env: ConfigService<Env, true>,
   ) {}
 
   /** The kind comes from the service; "either" services let the client choose. */
@@ -53,7 +59,59 @@ export class ServiceRequestsService {
         areas: service.asksAreas,
       }),
     );
+    await this.notifyStaffOfNewRequest(created, service.label);
     return { id: created.id };
+  }
+
+  /** Emails every active staff member about a new request. Never fails the submission. */
+  private async notifyStaffOfNewRequest(
+    request: ServiceRequest,
+    serviceLabel: string,
+  ): Promise<void> {
+    try {
+      const [staff, client] = await Promise.all([
+        this.prisma.profile.findMany({
+          where: { role: 'ADMIN', staffDisabledAt: null },
+          select: { user: { select: { email: true } } },
+        }),
+        this.prisma.profile.findUniqueOrThrow({
+          where: { id: request.clientId },
+          include: { user: { select: { email: true, phone: true } } },
+        }),
+      ]);
+      if (!staff.length) return;
+      const s = request.toSnapshot();
+      const reference = formatRequestRef(request.number!);
+      const adminUrl = this.env
+        .get('ADMIN_APP_URL', { infer: true })
+        .replace(/\/$/, '');
+      const summary = {
+        reference,
+        service: serviceLabel,
+        clientName: client.fullName,
+        clientEmail: client.user.email,
+        clientPhone: client.user.phone,
+        scheduledAt: s.scheduledAt,
+        area: `${s.address.sector}, ${s.address.district}`,
+        description: s.description,
+        link: `${adminUrl}/requests/${request.id}`,
+      };
+      // One message each, so staff addresses aren't shared with one another
+      const results = await Promise.allSettled(
+        staff.map(({ user }) =>
+          this.mailer.send(newRequestStaffEmail(user.email, summary)),
+        ),
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed)
+        this.logger.warn(
+          `New-request email for ${reference} failed for ${failed} of ${staff.length} staff`,
+        );
+    } catch (error) {
+      this.logger.error(
+        `New-request staff notification failed: ${(error as Error).message}`,
+      );
+    }
   }
 
   async requestAdjustment(

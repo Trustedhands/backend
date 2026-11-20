@@ -87,6 +87,19 @@ describe('Service request lifecycle (e2e)', () => {
       .send(newRequest)
       .expect(201);
     const id: string = created.body.id;
+
+    // Every active staff member hears about it, each in their own message
+    const staffEmail = t.mailer.sent.find(
+      (m) => m.to === admin.email && m.subject.startsWith('New request SR-'),
+    );
+    expect(staffEmail?.subject).toContain('Claire Dubois');
+    expect(staffEmail?.text).toContain(`/requests/${id}`);
+    expect(
+      t.mailer.sent.some(
+        (m) => m.to === client.email && m.subject.startsWith('New request'),
+      ),
+    ).toBe(false);
+
     expect(created.body).toMatchObject({
       status: 'REQUESTED',
       totalRwf: null,

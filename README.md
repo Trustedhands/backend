@@ -106,7 +106,7 @@ Bounded contexts:
 - **auth**: accounts, sessions, verification codes, email (Resend) and SMS delivery.
 - **identity**: client profile and home address.
 - **workers**: full worker profiles (identity, address, next of kin, payout details, and a photo and ID scans), a completeness checklist, and verification by an admin with the `workers.verify` permission, who must tick every ID check. Changing identity details or documents on a verified worker sends them back for verification. Only verified, active workers can be held or assigned.
-- **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints.
+- **service-requests**: the `ServiceRequest` aggregate and its lifecycle (see below). Client and admin endpoints. Each new request is emailed to every active staff member (one message each, linking to `ADMIN_APP_URL/requests/<id>`).
 - **payments**: the `Payment` aggregate, the MoMo gateway and payment history.
 - **configuration**: platform settings (fees, release rule, matching priority, and a MoMo on/off switch that pauses new payments; MTN MoMo is the only payment method) and **service types**, which ops can add, rename, hide and re-order. Requests reference a service by its key.
 - **team**: staff roles, invitations, and removing access.
